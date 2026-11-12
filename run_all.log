@@ -1,0 +1,111 @@
+
+======================================================================
+[run_all] efficiency
+======================================================================
+[efficiency] synthetic Kaula (N=360, seed=2009) | x86_64 Darwin 25.6.0, Python 3.13.2, NumPy 2.5.1, single thread
+[efficiency] Table 7 ...
+  LEGENDRE_a  GRID       1.114 ms/pt (CPU, 6000 pts) ->      71.8 s
+  LEGENDRE_a  ORBIT1     1.110 ms/pt (CPU, 6000 pts) ->      71.5 s
+  LEGENDRE_b  GRID       2.824 ms/pt (CPU, 600 pts) ->     182.0 s
+  LEGENDRE_b  ORBIT1     2.824 ms/pt (CPU, 600 pts) ->     182.0 s
+  PINES       GRID       1.537 ms/pt (CPU, 6000 pts) ->      99.0 s
+  PINES       ORBIT1     1.520 ms/pt (CPU, 6000 pts) ->      98.0 s
+  METRIS      GRID       0.589 ms/pt (CPU, 6000 pts) ->      37.9 s
+  METRIS      ORBIT1     0.568 ms/pt (CPU, 6000 pts) ->      36.6 s
+  CLENSHAW    GRID       0.005 ms/pt (CPU, 64440 pts) ->       0.3 s
+  CLENSHAW    ORBIT1     1.541 ms/pt (CPU, 6000 pts) ->      99.3 s
+[efficiency] cost vs degree ...
+  N= 20: LEGENDRE_a 0.011, LEGENDRE_b 0.124, PINES 0.013, METRIS 0.005, CLENSHAW 0.017 ms/pt
+  N= 30: LEGENDRE_a 0.018, LEGENDRE_b 0.182, PINES 0.027, METRIS 0.010, CLENSHAW 0.031 ms/pt
+  N= 45: LEGENDRE_a 0.038, LEGENDRE_b 0.269, PINES 0.047, METRIS 0.016, CLENSHAW 0.048 ms/pt
+  N= 60: LEGENDRE_a 0.053, LEGENDRE_b 0.335, PINES 0.067, METRIS 0.026, CLENSHAW 0.072 ms/pt
+  N= 90: LEGENDRE_a 0.101, LEGENDRE_b 0.513, PINES 0.131, METRIS 0.049, CLENSHAW 0.132 ms/pt
+  N=120: LEGENDRE_a 0.145, LEGENDRE_b 0.596, PINES 0.186, METRIS 0.069, CLENSHAW 0.187 ms/pt
+  N=180: LEGENDRE_a 0.298, LEGENDRE_b 1.051, PINES 0.414, METRIS 0.151, CLENSHAW 0.471 ms/pt
+  N=240: LEGENDRE_a 0.569, LEGENDRE_b 1.480, PINES 0.677, METRIS 0.253, CLENSHAW 0.742 ms/pt
+  N=300: LEGENDRE_a 0.843, LEGENDRE_b 2.053, PINES 1.036, METRIS 0.412, CLENSHAW 1.139 ms/pt
+  N=360: LEGENDRE_a 1.037, LEGENDRE_b 2.785, PINES 1.591, METRIS 0.524, CLENSHAW 1.628 ms/pt
+# Table 7 emulation: CPU time of the synthesis programmes (N = 360)
+
+Model: synthetic Kaula (N=360, seed=2009). Machine: x86_64 Darwin 25.6.0, Python 3.13.2, NumPy 2.5.1, single thread. Timing: process CPU time on 6000 evenly spaced points per scenario (600 for LEGENDRE_b), extrapolated; CLENSHAW/GRID per parallel on all points.
+
+| Programme | GRID [s] | paper | ORBIT1 [s] | paper | ORBIT2 [h] | paper [h] | GRID / LEG_a | paper | ORBIT1 / LEG_a | paper |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| LEGENDRE_a | 71.8 | 2390 | 71.5 | 2079 | 0.62 | 17.9 | 1.000 | 1.000 | 1.00 | 1.00 |
+| LEGENDRE_b | 182.0 | 9793 | 182.0 | 9975 | 1.57 | 85.9 | 2.535 | 4.097 | 2.54 | 4.80 |
+| PINES | 99.0 | 5275 | 98.0 | 6306 | 0.84 | 54.3 | 1.379 | 2.207 | 1.37 | 3.03 |
+| METRIS | 37.9 | 3271 | 36.6 | 3418 | 0.32 | 29.4 | 0.528 | 1.369 | 0.51 | 1.64 |
+| CLENSHAW | 0.3 | 8 | 99.3 | 992 | 0.86 | 8.5 | 0.004 | 0.003 | 1.39 | 0.48 |
+
+Paper: Pentium IV 1.3 GHz, Fortran90/77 (LEGENDRE_b: Matlab + DLL), binary I/O included. ORBIT2 = ORBIT1 x 2e6 / 64,440 (paper: x 31.04).
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results/fig04_ground_track.pdf
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results/fig_efficiency.pdf
+[run_all] efficiency done in 1.1 min
+
+======================================================================
+[run_all] precision
+======================================================================
+[precision] CLENSHAW*16 reference, 4296 points: 30.4 s
+[precision] LEGENDRE_a*8:    4.7 s
+[precision] LEGENDRE_b*8:   12.4 s
+[precision] PINES     *8:    6.5 s
+[precision] METRIS    *8:    2.6 s
+[precision] CLENSHAW  *8:    0.3 s
+[precision] PINES*16 (Cartesian), 540 points: 107.0 s
+[precision] median digits (local frame, vs CLENSHAW*16):
+                V    Vl    Vp    Vr   Vll   Vlp   Vpp   Vlr   Vpr   Vrr
+LEGENDRE_a   15.3  14.9  15.2  15.3  15.3  14.5  15.3  14.5  15.3  15.3
+LEGENDRE_b   15.9  15.0  15.8  15.9  15.8  14.5  15.8  14.6  15.7  15.9
+PINES        15.3  11.9  13.5  15.3  15.3  12.2  15.3  12.5  13.7  15.1
+METRIS       15.3  10.9  12.6  15.3  15.2  11.4  15.2  11.7  13.0  15.3
+CLENSHAW     15.5  14.9  15.4  15.5  15.5  14.5  15.5  14.5  15.4  15.5
+[precision] median digits (Cartesian):
+                                          V    Vx    Vy    Vz   Vxx   Vxy   Vxz   Vyy   Vyz   Vzz
+METRIS*8 vs PINES*16 (Fig. 10)         15.4  15.2  15.2  15.3  15.1  15.2  15.2  15.1  15.3  15.2
+METRIS*8 vs CLENSHAW*16                15.4  15.2  15.2  15.3  15.1  15.2  15.2  15.1  15.3  15.2
+PINES*8 vs CLENSHAW*16                 15.3  15.3  15.3  15.3  15.0  15.3  15.3  15.1  15.3  14.9
+LEGENDRE_a*8 rotated vs CLENSHAW*16    15.3  15.3  15.3  15.3  15.1  15.3  15.4  15.1  15.4  15.1
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results/fig05_precision_LEGENDRE_a.pdf
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results/fig06_precision_LEGENDRE_b.pdf
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results/fig07_precision_PINES.pdf
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results/fig08_precision_METRIS.pdf
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results/fig09_precision_CLENSHAW.pdf
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results/fig10_precision_PINES16_METRIS8.pdf
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results/fig_precision_summary.pdf
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results/fig_precision_conditioning.pdf
+[run_all] precision done in 3.1 min
+
+======================================================================
+[run_all] accuracy
+======================================================================
+[precision] loaded precision_cache.npz
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results/fig_accuracy_laplace.pdf
+[accuracy] Eqs. 32-33 FCR*8               3.9 s
+[accuracy] Eqs. 32-33 Helmholtz FCR*8     3.8 s
+[accuracy] Eqs. 32-33 FCR*16              7.2 s
+[accuracy] Eqs. 32-33 MSR*8               6.0 s
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results/fig_accuracy_identities.pdf
+[accuracy] MSR vs FCR*16 on 5 parallels: 1.7 s
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results/fig03_msr_instability.pdf
+
+[accuracy] Eq. 31 |trace| [s^-2] / relative to |V_rr| (median, max over points)
+   LEGENDRE_a    1.91e-21  1.61e-20    7.00e-16  5.87e-15
+   LEGENDRE_b    4.24e-22  2.96e-21    1.56e-16  1.08e-15
+   PINES         3.18e-21  2.03e-20    1.16e-15  7.42e-15
+   METRIS        1.27e-21  1.04e-20    4.63e-16  3.78e-15
+   CLENSHAW      1.27e-21  1.08e-20    4.66e-16  3.94e-15
+   REF16         8.27e-25  7.86e-24    3.02e-19  2.86e-18
+[accuracy] Eqs. 32 / 33 relative residual (median, max over parallels)
+   FCR*8             1.30e-14  6.13e-13    1.03e-14  7.52e-13
+   Helmholtz FCR*8   1.23e-14  5.65e-13    1.01e-14  6.96e-13
+   FCR*16            6.61e-18  3.60e-16    5.42e-18  3.81e-16
+   MSR*8            2.46e+167 2.63e+238   2.62e+167 6.45e+235
+[accuracy] MSR*8 max log10 relative error vs FCR*16 per parallel
+      30 deg    59.1
+      60 deg   108.7
+       5 deg     0.6
+      15 deg    25.4
+      85 deg   120.7
+[run_all] accuracy done in 0.4 min
+
+[run_all] all done in 4.6 min -> /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results
