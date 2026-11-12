@@ -1,5 +1,5 @@
 """
-sph_efficiency.py -- computational efficiency of the five synthesis programmes
+sph_efficiency.py -- computational efficiency of the synthesis programmes
 (Table 7 and Fig. 4 of Fantino & Casotto 2009).
 
 Scenarios (paper, Sect. 7):
@@ -154,9 +154,10 @@ def write_tables(res, outdir, meta):
     for meth in sc.METHODS:
         row = [meth]
         for s in SCENARIOS:
-            t, p = res[meth][s]["cpu"], PAPER_T7[meth][s]
-            row += [f"{t:.2f}", f"{t / 3600:.3f}", f"{p}", f"{t / res['LEGENDRE_a'][s]['cpu']:.3f}",
-                    f"{p / PAPER_T7['LEGENDRE_a'][s]:.3f}"]
+            t, p = res[meth][s]["cpu"], PAPER_T7.get(meth, {}).get(s)
+            row += [f"{t:.2f}", f"{t / 3600:.3f}", "" if p is None else f"{p}",
+                    f"{t / res['LEGENDRE_a'][s]['cpu']:.3f}",
+                    "" if p is None else f"{p / PAPER_T7['LEGENDRE_a'][s]:.3f}"]
         lines.append(",".join(row))
     ss.write_output(outdir / "table7.csv", "\n".join(lines) + "\n", tag="Table")
 
@@ -166,17 +167,20 @@ def write_tables(res, outdir, meta):
           "| Programme | GRID [s] | paper | ORBIT1 [s] | paper | ORBIT2 [h] | paper [h] "
           "| GRID / LEG_a | paper | ORBIT1 / LEG_a | paper |",
           "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
+    P0 = PAPER_T7["LEGENDRE_a"]
     for meth in sc.METHODS:
-        r_, p_ = res[meth], PAPER_T7[meth]
+        r_, p_ = res[meth], PAPER_T7.get(meth)
+        pg, po, p2, rg, ro = (("-",) * 5 if p_ is None else
+                              (p_["GRID"], p_["ORBIT1"], f"{p_['ORBIT2'] / 3600:.1f}",
+                               f"{p_['GRID'] / P0['GRID']:.3f}", f"{p_['ORBIT1'] / P0['ORBIT1']:.2f}"))
         md.append(
-            f"| {meth} | {r_['GRID']['cpu']:.1f} | {p_['GRID']} | {r_['ORBIT1']['cpu']:.1f} | "
-            f"{p_['ORBIT1']} | {r_['ORBIT2']['cpu'] / 3600:.2f} | {p_['ORBIT2'] / 3600:.1f} | "
-            f"{r_['GRID']['cpu'] / res['LEGENDRE_a']['GRID']['cpu']:.3f} | "
-            f"{p_['GRID'] / PAPER_T7['LEGENDRE_a']['GRID']:.3f} | "
-            f"{r_['ORBIT1']['cpu'] / res['LEGENDRE_a']['ORBIT1']['cpu']:.2f} | "
-            f"{p_['ORBIT1'] / PAPER_T7['LEGENDRE_a']['ORBIT1']:.2f} |")
+            f"| {meth} | {r_['GRID']['cpu']:.1f} | {pg} | {r_['ORBIT1']['cpu']:.1f} | "
+            f"{po} | {r_['ORBIT2']['cpu'] / 3600:.2f} | {p2} | "
+            f"{r_['GRID']['cpu'] / res['LEGENDRE_a']['GRID']['cpu']:.3f} | {rg} | "
+            f"{r_['ORBIT1']['cpu'] / res['LEGENDRE_a']['ORBIT1']['cpu']:.2f} | {ro} |")
     md += ["", "Paper: Pentium IV 1.3 GHz, Fortran90/77 (LEGENDRE_b: Matlab + DLL), binary I/O "
-               "included. ORBIT2 = ORBIT1 x 2e6 / 64,440 (paper: x 31.04)."]
+               "included. ORBIT2 = ORBIT1 x 2e6 / 64,440 (paper: x 31.04). GOTTLIEB is not "
+               "in the paper (added for comparison)."]
     ss.write_output(outdir / "table7.md", "\n".join(md) + "\n", tag="Table")
     print("\n".join(md))
 
@@ -223,11 +227,13 @@ def _dumbbell(ax, res, scen):
     vals = []
     for yi, meth in zip(y, meths):
         ours = res[meth][scen]["cpu"] / ref_o
-        pap = PAPER_T7[meth][scen] / ref_p
-        vals += [ours, pap]
-        ax.plot([ours, pap], [yi, yi], color="0.75", lw=1.0, zorder=1)
-        ax.plot(pap, yi, marker=ss.METHOD_MARKER[meth], mfc="white", mec=ss.C_PAPER, ms=5,
-                ls="none", zorder=2)
+        vals.append(ours)
+        if meth in PAPER_T7:  # GOTTLIEB is not in the paper
+            pap = PAPER_T7[meth][scen] / ref_p
+            vals.append(pap)
+            ax.plot([ours, pap], [yi, yi], color="0.75", lw=1.0, zorder=1)
+            ax.plot(pap, yi, marker=ss.METHOD_MARKER[meth], mfc="white", mec=ss.C_PAPER, ms=5,
+                    ls="none", zorder=2)
         ax.plot(ours, yi, marker=ss.METHOD_MARKER[meth], color=ss.METHOD_COLOR[meth], ms=5,
                 ls="none", zorder=3)
         tr = mtransforms.blended_transform_factory(ax.transAxes, ax.transData)

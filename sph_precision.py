@@ -1,5 +1,5 @@
 """
-sph_precision.py -- relative numerical precision of the five synthesis programmes
+sph_precision.py -- relative numerical precision of the synthesis programmes
 (Figs. 5-10 of Fantino & Casotto 2009).
 
 Precision = number of coinciding decimal digits, -log10(|x*8 - x_ref| / |x_ref|), of each of
@@ -7,6 +7,7 @@ the ten quantities (V, its gradient and its gradient tensor in the local frame) 
 double precision (*8), against a reference computed in extended precision (*16):
 
     Figs. 5-9   CLENSHAW*16 vs LEGENDRE_a*8, LEGENDRE_b*8, PINES*8, METRIS*8, CLENSHAW*8
+    Fig. 7b     CLENSHAW*16 vs GOTTLIEB*8 (not in the paper)
     Fig. 10     PINES*16 vs METRIS*8 (Cartesian components)
 
 "*16" is numpy.longdouble: 80-bit x87 extended precision on x86_64 (64-bit mantissa, 19-20
@@ -26,7 +27,7 @@ of the synthesis from that of the local <-> Cartesian rotation (the open questio
 Outputs (in --out, default ./results):
     precision_cache.npz                      outputs and digits (re-used by sph_accuracy.py)
     precision_summary.csv                    median / 1st percentile / minimum digits
-    fig05_precision_LEGENDRE_a.pdf ... fig09_precision_CLENSHAW.pdf, fig10_precision_PINES16_METRIS8.pdf
+    fig05_precision_LEGENDRE_a.pdf ... fig09_precision_CLENSHAW.pdf (fig07b: GOTTLIEB), fig10_precision_PINES16_METRIS8.pdf
     fig_precision_summary.pdf
     fig_precision_conditioning.pdf           digits vs condition number of the local components
 
@@ -65,16 +66,17 @@ EXTENDED = np.finfo(LD).eps < 1e-18
 # panel order of Figs. 5-10 (row-wise, 5 x 2)
 PANEL_LOCAL = ("V", "Vl", "Vp", "Vr", "Vll", "Vpp", "Vrr", "Vlp", "Vlr", "Vpr")
 PANEL_CART = ("V", "Vx", "Vy", "Vz", "Vxx", "Vyy", "Vzz", "Vxz", "Vxy", "Vyz")
-FIG_NUM = {"LEGENDRE_a": 5, "LEGENDRE_b": 6, "PINES": 7, "METRIS": 8, "CLENSHAW": 9}
+FIG_NUM = {"LEGENDRE_a": "05", "LEGENDRE_b": "06", "PINES": "07", "GOTTLIEB": "07b",
+           "METRIS": "08", "CLENSHAW": "09"}  # 07b: GOTTLIEB is not in the paper
 # Cartesian comparisons of the summary figure: (label, test, reference)
 CART_PAIRS = (
     ("METRIS*8 vs PINES*16 (Fig. 10)", "METRIS", "PINES16"),
     ("METRIS*8 vs CLENSHAW*16", "METRIS", "CLEN16"),
     ("PINES*8 vs CLENSHAW*16", "PINES", "CLEN16"),
+    ("GOTTLIEB*8 vs CLENSHAW*16", "GOTTLIEB", "CLEN16"),
     ("LEGENDRE_a*8 rotated vs CLENSHAW*16", "LEGENDRE_a", "CLEN16"),
 )
-PAIR_COLOR = {"METRIS": ss.METHOD_COLOR["METRIS"], "PINES": ss.METHOD_COLOR["PINES"],
-              "LEGENDRE_a": ss.METHOD_COLOR["LEGENDRE_a"]}
+PAIR_COLOR = {m: ss.METHOD_COLOR[m] for m in ("METRIS", "PINES", "GOTTLIEB", "LEGENDRE_a")}
 
 
 # ============================================================
@@ -108,7 +110,7 @@ def compute_local(model, lat_step, lon_step, h=250e3, backend="numpy"):
 
 def compute_cart(model, lat_step, lon_step, h=250e3, backend="numpy"):
     """Cartesian components on the reduced set: PINES*16, CLENSHAW*16 rotated in *16,
-    METRIS*8, PINES*8, LEGENDRE_a*8 rotated in *8."""
+    METRIS*8, PINES*8, GOTTLIEB*8, LEGENDRE_a*8 rotated in *8."""
     lon, lat, lam, phi, r = _grid(lat_step, lon_step, h)
     out = {"lon": lon, "lat": lat}
     t0 = time.perf_counter()
@@ -118,7 +120,7 @@ def compute_cart(model, lat_step, lon_step, h=250e3, backend="numpy"):
                              r[0], dtype=LD)
     out["CLEN16"] = sc.local_to_cart(loc16, lam.astype(LD), phi.astype(LD))
     B = sr if backend == "rust" else sc
-    for meth in ("METRIS", "PINES", "LEGENDRE_a"):
+    for meth in ("METRIS", "PINES", "GOTTLIEB", "LEGENDRE_a"):
         _, out[meth] = B.synthesize(meth, model, lam, phi, r, cartesian=True)
     return out
 
@@ -130,7 +132,9 @@ def load_or_compute(model, a, outdir):
                    + ([1.0] if a.backend == "rust" else []))
     if path.exists() and not a.recompute:
         z = np.load(path, allow_pickle=False)
-        if "key" in z and z["key"].shape == key.shape and np.allclose(z["key"], key):
+        need = {f"loc_{m}" for m in sc.METHODS} | {f"car_{t}" for _, t, _ in CART_PAIRS}
+        if ("key" in z and z["key"].shape == key.shape and np.allclose(z["key"], key)
+                and need <= set(z.files)):
             loc = {k[4:]: z[k] for k in z.files if k.startswith("loc_")}
             car = {k[4:]: z[k] for k in z.files if k.startswith("car_")}
             print(f"[precision] loaded {path.name}")
@@ -237,8 +241,8 @@ def fig_summary(dl, dc, n_loc, n_car, name="fig_precision_summary"):
     a1.grid(axis="x", visible=False)
 
     xq = np.arange(len(PANEL_CART))
-    off = np.linspace(-0.27, 0.27, len(CART_PAIRS))
-    mk = ("D", "o", "^", "s")
+    off = np.linspace(-0.3, 0.3, len(CART_PAIRS))
+    mk = ("D", "o", "^", "P", "s")
     for j, (lab, t, r) in enumerate(CART_PAIRS):
         med, p1, _ = _stats(dc[f"{t}|{r}"])
         idx = [sc.CART.index(q) for q in PANEL_CART]
@@ -256,7 +260,7 @@ def fig_summary(dl, dc, n_loc, n_car, name="fig_precision_summary"):
     lo = min(a1.get_ylim()[0], a2.get_ylim()[0])
     for ax in (a1, a2):
         ax.set_ylim(max(lo, 0), 16.8)
-    fig.legend(*a1.get_legend_handles_labels(), loc="outside upper center", ncol=5)
+    fig.legend(*a1.get_legend_handles_labels(), loc="outside upper center", ncol=6)
     a2.legend(loc="lower left", ncol=1, fontsize=6, handletextpad=0.3)
     fig.text(0.5, -0.02, "marker: median over the points; bar: down to the 1st percentile",
              ha="center", va="top", fontsize=6.5, color="0.3")
@@ -399,7 +403,7 @@ def main(argv=None):
     for meth in sc.METHODS:
         title = ss.tex_escape(f"Relative numerical precision: CLENSHAW*16 vs {meth}*8")
         fig_precision(np.degrees(loc["phi"]), loc["lat"], dl[meth], PANEL_LOCAL, ss.METHOD_COLOR[meth],
-                      title, f"fig{FIG_NUM[meth]:02d}_precision_{meth}", ylim)
+                      title, f"fig{FIG_NUM[meth]}_precision_{meth}", ylim)
     lat_c = np.arange(-89.0, 89.0 + 1e-9, a.cart_lat_step)
     LATc = np.repeat(lat_c, car["lon"].size)
     fig_precision(LATc, lat_c, dc["METRIS|PINES16"], PANEL_CART, ss.METHOD_COLOR["METRIS"],

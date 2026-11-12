@@ -162,11 +162,12 @@ def apply_style():
 
 
 # Okabe-Ito colors (colorblind-safe). Each method has ONE color in every figure.
-METHODS = ("LEGENDRE_a", "LEGENDRE_b", "PINES", "METRIS", "CLENSHAW")
+METHODS = ("LEGENDRE_a", "LEGENDRE_b", "PINES", "GOTTLIEB", "METRIS", "CLENSHAW")
 METHOD_COLOR = {
     "LEGENDRE_a": "#0072B2",  # blue
     "LEGENDRE_b": "#56B4E9",  # sky blue (same algorithm, interpreted implementation)
     "PINES": "#009E73",  # bluish green
+    "GOTTLIEB": "#E69F00",  # orange (not in the paper)
     "METRIS": "#D55E00",  # vermillion
     "CLENSHAW": "#CC79A7",  # reddish purple
 }
@@ -174,6 +175,7 @@ METHOD_MARKER = {
     "LEGENDRE_a": "o",
     "LEGENDRE_b": "s",
     "PINES": "^",
+    "GOTTLIEB": "P",
     "METRIS": "D",
     "CLENSHAW": "v",
 }

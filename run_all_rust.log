@@ -2,79 +2,86 @@
 ======================================================================
 [run_all] efficiency
 ======================================================================
-[rust] cargo build --release (sph_rs) ...
 [efficiency] synthetic Kaula (N=360, seed=2009) | Darwin 25.6.0, rustc 1.87.0, aarch64-apple-darwin, opt-level 3 + LTO, scalar kernels (no fast-math), single thread
 [efficiency] Table 7 ...
-  LEGENDRE_a  GRID       0.160 ms/pt (CPU, 64440 pts) ->      10.3 s
-  LEGENDRE_a  ORBIT1     0.159 ms/pt (CPU, 64440 pts) ->      10.3 s
-  LEGENDRE_b  GRID       0.496 ms/pt (CPU, 64440 pts) ->      32.0 s
-  LEGENDRE_b  ORBIT1     0.496 ms/pt (CPU, 64440 pts) ->      32.0 s
-  PINES       GRID       0.410 ms/pt (CPU, 64440 pts) ->      26.4 s
-  PINES       ORBIT1     0.411 ms/pt (CPU, 64440 pts) ->      26.5 s
-  METRIS      GRID       0.313 ms/pt (CPU, 64440 pts) ->      20.1 s
-  METRIS      ORBIT1     0.315 ms/pt (CPU, 64440 pts) ->      20.3 s
+  LEGENDRE_a  GRID       0.172 ms/pt (CPU, 64440 pts) ->      11.1 s
+  LEGENDRE_a  ORBIT1     0.174 ms/pt (CPU, 64440 pts) ->      11.2 s
+  LEGENDRE_b  GRID       0.499 ms/pt (CPU, 64440 pts) ->      32.2 s
+  LEGENDRE_b  ORBIT1     0.497 ms/pt (CPU, 64440 pts) ->      32.1 s
+  PINES       GRID       0.409 ms/pt (CPU, 64440 pts) ->      26.4 s
+  PINES       ORBIT1     0.419 ms/pt (CPU, 64440 pts) ->      27.0 s
+  GOTTLIEB    GRID       0.400 ms/pt (CPU, 64440 pts) ->      25.8 s
+  GOTTLIEB    ORBIT1     0.400 ms/pt (CPU, 64440 pts) ->      25.8 s
+  METRIS      GRID       0.331 ms/pt (CPU, 64440 pts) ->      21.3 s
+  METRIS      ORBIT1     0.333 ms/pt (CPU, 64440 pts) ->      21.5 s
   CLENSHAW    GRID       0.003 ms/pt (CPU, 64440 pts) ->       0.2 s
-  CLENSHAW    ORBIT1     0.589 ms/pt (CPU, 64440 pts) ->      38.0 s
+  CLENSHAW    ORBIT1     0.590 ms/pt (CPU, 64440 pts) ->      38.0 s
 [efficiency] cost vs degree ...
-  N= 20: LEGENDRE_a 0.001, LEGENDRE_b 0.003, PINES 0.002, METRIS 0.001, CLENSHAW 0.002 ms/pt
-  N= 30: LEGENDRE_a 0.002, LEGENDRE_b 0.005, PINES 0.003, METRIS 0.003, CLENSHAW 0.005 ms/pt
-  N= 45: LEGENDRE_a 0.003, LEGENDRE_b 0.011, PINES 0.007, METRIS 0.006, CLENSHAW 0.010 ms/pt
-  N= 60: LEGENDRE_a 0.005, LEGENDRE_b 0.017, PINES 0.012, METRIS 0.010, CLENSHAW 0.018 ms/pt
-  N= 90: LEGENDRE_a 0.011, LEGENDRE_b 0.037, PINES 0.027, METRIS 0.022, CLENSHAW 0.038 ms/pt
-  N=120: LEGENDRE_a 0.019, LEGENDRE_b 0.061, PINES 0.047, METRIS 0.037, CLENSHAW 0.067 ms/pt
-  N=180: LEGENDRE_a 0.041, LEGENDRE_b 0.129, PINES 0.102, METRIS 0.079, CLENSHAW 0.148 ms/pt
-  N=240: LEGENDRE_a 0.073, LEGENDRE_b 0.227, PINES 0.182, METRIS 0.137, CLENSHAW 0.263 ms/pt
-  N=300: LEGENDRE_a 0.112, LEGENDRE_b 0.350, PINES 0.284, METRIS 0.210, CLENSHAW 0.409 ms/pt
-  N=360: LEGENDRE_a 0.161, LEGENDRE_b 0.500, PINES 0.410, METRIS 0.315, CLENSHAW 0.589 ms/pt
+  N= 20: LEGENDRE_a 0.001, LEGENDRE_b 0.003, PINES 0.002, GOTTLIEB 0.002, METRIS 0.001, CLENSHAW 0.002 ms/pt
+  N= 30: LEGENDRE_a 0.002, LEGENDRE_b 0.005, PINES 0.003, GOTTLIEB 0.003, METRIS 0.003, CLENSHAW 0.005 ms/pt
+  N= 45: LEGENDRE_a 0.003, LEGENDRE_b 0.011, PINES 0.007, GOTTLIEB 0.007, METRIS 0.007, CLENSHAW 0.010 ms/pt
+  N= 60: LEGENDRE_a 0.005, LEGENDRE_b 0.017, PINES 0.012, GOTTLIEB 0.012, METRIS 0.011, CLENSHAW 0.017 ms/pt
+  N= 90: LEGENDRE_a 0.011, LEGENDRE_b 0.037, PINES 0.027, GOTTLIEB 0.027, METRIS 0.023, CLENSHAW 0.038 ms/pt
+  N=120: LEGENDRE_a 0.019, LEGENDRE_b 0.060, PINES 0.047, GOTTLIEB 0.046, METRIS 0.039, CLENSHAW 0.067 ms/pt
+  N=180: LEGENDRE_a 0.041, LEGENDRE_b 0.129, PINES 0.102, GOTTLIEB 0.102, METRIS 0.085, CLENSHAW 0.148 ms/pt
+  N=240: LEGENDRE_a 0.073, LEGENDRE_b 0.225, PINES 0.181, GOTTLIEB 0.180, METRIS 0.145, CLENSHAW 0.261 ms/pt
+  N=300: LEGENDRE_a 0.113, LEGENDRE_b 0.350, PINES 0.284, GOTTLIEB 0.277, METRIS 0.228, CLENSHAW 0.407 ms/pt
+  N=360: LEGENDRE_a 0.160, LEGENDRE_b 0.496, PINES 0.407, GOTTLIEB 0.400, METRIS 0.325, CLENSHAW 0.588 ms/pt
 # Table 7 emulation: CPU time of the synthesis programmes (N = 360)
 
 Model: synthetic Kaula (N=360, seed=2009). Machine: Darwin 25.6.0, rustc 1.87.0, aarch64-apple-darwin, opt-level 3 + LTO, scalar kernels (no fast-math), single thread. Timing: CPU time of the synthesis loop inside the binary, every point, best of 2.
 
 | Programme | GRID [s] | paper | ORBIT1 [s] | paper | ORBIT2 [h] | paper [h] | GRID / LEG_a | paper | ORBIT1 / LEG_a | paper |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| LEGENDRE_a | 10.3 | 2390 | 10.3 | 2079 | 0.09 | 17.9 | 1.000 | 1.000 | 1.00 | 1.00 |
-| LEGENDRE_b | 32.0 | 9793 | 32.0 | 9975 | 0.28 | 85.9 | 3.109 | 4.097 | 3.11 | 4.80 |
-| PINES | 26.4 | 5275 | 26.5 | 6306 | 0.23 | 54.3 | 2.565 | 2.207 | 2.58 | 3.03 |
-| METRIS | 20.1 | 3271 | 20.3 | 3418 | 0.18 | 29.4 | 1.958 | 1.369 | 1.98 | 1.64 |
-| CLENSHAW | 0.2 | 8 | 38.0 | 992 | 0.33 | 8.5 | 0.017 | 0.003 | 3.70 | 0.48 |
+| LEGENDRE_a | 11.1 | 2390 | 11.2 | 2079 | 0.10 | 17.9 | 1.000 | 1.000 | 1.00 | 1.00 |
+| LEGENDRE_b | 32.2 | 9793 | 32.1 | 9975 | 0.28 | 85.9 | 2.908 | 4.097 | 2.86 | 4.80 |
+| PINES | 26.4 | 5275 | 27.0 | 6306 | 0.23 | 54.3 | 2.383 | 2.207 | 2.41 | 3.03 |
+| GOTTLIEB | 25.8 | - | 25.8 | - | 0.22 | - | 2.328 | - | 2.30 | - |
+| METRIS | 21.3 | 3271 | 21.5 | 3418 | 0.19 | 29.4 | 1.927 | 1.369 | 1.92 | 1.64 |
+| CLENSHAW | 0.2 | 8 | 38.0 | 992 | 0.33 | 8.5 | 0.016 | 0.003 | 3.39 | 0.48 |
 
-Paper: Pentium IV 1.3 GHz, Fortran90/77 (LEGENDRE_b: Matlab + DLL), binary I/O included. ORBIT2 = ORBIT1 x 2e6 / 64,440 (paper: x 31.04).
+Paper: Pentium IV 1.3 GHz, Fortran90/77 (LEGENDRE_b: Matlab + DLL), binary I/O included. ORBIT2 = ORBIT1 x 2e6 / 64,440 (paper: x 31.04). GOTTLIEB is not in the paper (added for comparison).
 [Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust/fig04_ground_track.pdf
 [Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust/fig_efficiency.pdf
-[run_all] efficiency done in 8.0 min
+[run_all] efficiency done in 10.0 min
 
 ======================================================================
 [run_all] precision
 ======================================================================
-[precision] CLENSHAW*16 reference, 4296 points: 38.8 s
+[precision] cache does not match the setup: recomputing
+[precision] CLENSHAW*16 reference, 4296 points: 38.5 s
 [precision] LEGENDRE_a*8:    0.7 s
 [precision] LEGENDRE_b*8:    2.2 s
 [precision] PINES     *8:    1.8 s
+[precision] GOTTLIEB  *8:    1.8 s
 [precision] METRIS    *8:    1.4 s
-[precision] CLENSHAW  *8:    0.2 s
-[precision] PINES*16 (Cartesian), 540 points: 139.1 s
+[precision] CLENSHAW  *8:    0.1 s
+[precision] PINES*16 (Cartesian), 540 points: 135.4 s
 [precision] median digits (local frame, vs CLENSHAW*16):
                 V    Vl    Vp    Vr   Vll   Vlp   Vpp   Vlr   Vpr   Vrr
 LEGENDRE_a   15.3  14.9  15.2  15.3  15.3  14.5  15.3  14.5  15.3  15.3
 LEGENDRE_b   15.3  14.9  15.2  15.3  15.3  14.5  15.3  14.6  15.3  15.3
 PINES        15.3  11.9  13.5  15.3  15.3  12.3  15.3  12.5  13.7  15.1
-METRIS       14.3   9.9  11.5  14.3  14.3  10.3  14.2  10.6  12.0  14.3
+GOTTLIEB     15.3  11.8  13.5  15.3  15.3  12.2  15.3  12.4  13.7  15.3
+METRIS       15.3  10.9  12.6  15.3  15.2  11.4  15.2  11.7  13.0  15.3
 CLENSHAW     15.4  14.9  15.3  15.4  15.4  14.5  15.4  14.5  15.3  15.4
 [precision] median digits (Cartesian):
                                           V    Vx    Vy    Vz   Vxx   Vxy   Vxz   Vyy   Vyz   Vzz
-METRIS*8 vs PINES*16 (Fig. 10)         14.3  14.2  14.2  14.2  14.2  14.2  14.2  14.2  14.2  14.2
-METRIS*8 vs CLENSHAW*16                14.3  14.2  14.2  14.2  14.2  14.2  14.2  14.2  14.2  14.2
+METRIS*8 vs PINES*16 (Fig. 10)         15.4  15.2  15.2  15.3  15.2  15.2  15.2  15.2  15.3  15.2
+METRIS*8 vs CLENSHAW*16                15.4  15.2  15.2  15.3  15.2  15.2  15.2  15.2  15.3  15.2
 PINES*8 vs CLENSHAW*16                 15.3  15.3  15.3  15.3  15.0  15.3  15.3  15.1  15.3  14.9
+GOTTLIEB*8 vs CLENSHAW*16              15.3  15.2  15.3  15.3  15.1  15.3  15.4  15.1  15.4  15.1
 LEGENDRE_a*8 rotated vs CLENSHAW*16    15.3  15.3  15.3  15.3  15.1  15.3  15.4  15.1  15.4  15.1
 [Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust/fig05_precision_LEGENDRE_a.pdf
 [Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust/fig06_precision_LEGENDRE_b.pdf
 [Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust/fig07_precision_PINES.pdf
+[Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust/fig07b_precision_GOTTLIEB.pdf
 [Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust/fig08_precision_METRIS.pdf
 [Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust/fig09_precision_CLENSHAW.pdf
 [Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust/fig10_precision_PINES16_METRIS8.pdf
 [Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust/fig_precision_summary.pdf
 [Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust/fig_precision_conditioning.pdf
-[run_all] precision done in 3.7 min
+[run_all] precision done in 3.5 min
 
 ======================================================================
 [run_all] accuracy
@@ -84,16 +91,17 @@ LEGENDRE_a*8 rotated vs CLENSHAW*16    15.3  15.3  15.3  15.3  15.1  15.3  15.4 
 [accuracy] Eqs. 32-33 FCR*8               4.9 s
 [accuracy] Eqs. 32-33 Helmholtz FCR*8     4.9 s
 [accuracy] Eqs. 32-33 FCR*16              9.1 s
-[accuracy] Eqs. 32-33 MSR*8               7.5 s
+[accuracy] Eqs. 32-33 MSR*8               7.6 s
 [Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust/fig_accuracy_identities.pdf
-[accuracy] MSR vs FCR*16 on 5 parallels: 2.0 s
+[accuracy] MSR vs FCR*16 on 5 parallels: 2.1 s
 [Figure] saved /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust/fig03_msr_instability.pdf
 
 [accuracy] Eq. 31 |trace| [s^-2] / relative to |V_rr| (median, max over points)
    LEGENDRE_a    1.91e-21  1.61e-20    7.00e-16  5.87e-15
    LEGENDRE_b    1.91e-21  1.61e-20    7.00e-16  5.87e-15
    PINES         3.18e-21  2.10e-20    1.17e-15  7.65e-15
-   METRIS        1.31e-20  9.87e-20    4.80e-15  3.60e-14
+   GOTTLIEB      2.12e-21  2.20e-20    7.74e-16  8.04e-15
+   METRIS        1.27e-21  9.95e-21    4.63e-16  3.63e-15
    CLENSHAW      1.48e-21  1.88e-20    5.44e-16  6.86e-15
    REF16         8.27e-25  7.86e-24    3.02e-19  2.86e-18
 [accuracy] Eqs. 32 / 33 relative residual (median, max over parallels)
@@ -109,4 +117,4 @@ LEGENDRE_a*8 rotated vs CLENSHAW*16    15.3  15.3  15.3  15.3  15.1  15.3  15.4 
       85 deg   120.7
 [run_all] accuracy done in 0.5 min
 
-[run_all] all done in 12.2 min -> /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust
+[run_all] all done in 14.0 min -> /Users/gife3672/Library/CloudStorage/OneDrive-UCB-O365 (9-19-26 11:30 AM)/Desktop/Academia_Offline/SPH_comparisons/results_rust

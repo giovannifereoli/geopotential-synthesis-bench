@@ -4,10 +4,11 @@ Model: synthetic Kaula (N=360, seed=2009). Machine: Darwin 25.6.0, rustc 1.87.0,
 
 | Programme | GRID [s] | paper | ORBIT1 [s] | paper | ORBIT2 [h] | paper [h] | GRID / LEG_a | paper | ORBIT1 / LEG_a | paper |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| LEGENDRE_a | 10.3 | 2390 | 10.3 | 2079 | 0.09 | 17.9 | 1.000 | 1.000 | 1.00 | 1.00 |
-| LEGENDRE_b | 32.0 | 9793 | 32.0 | 9975 | 0.28 | 85.9 | 3.109 | 4.097 | 3.11 | 4.80 |
-| PINES | 26.4 | 5275 | 26.5 | 6306 | 0.23 | 54.3 | 2.565 | 2.207 | 2.58 | 3.03 |
-| METRIS | 20.1 | 3271 | 20.3 | 3418 | 0.18 | 29.4 | 1.958 | 1.369 | 1.98 | 1.64 |
-| CLENSHAW | 0.2 | 8 | 38.0 | 992 | 0.33 | 8.5 | 0.017 | 0.003 | 3.70 | 0.48 |
+| LEGENDRE_a | 11.1 | 2390 | 11.2 | 2079 | 0.10 | 17.9 | 1.000 | 1.000 | 1.00 | 1.00 |
+| LEGENDRE_b | 32.2 | 9793 | 32.1 | 9975 | 0.28 | 85.9 | 2.908 | 4.097 | 2.86 | 4.80 |
+| PINES | 26.4 | 5275 | 27.0 | 6306 | 0.23 | 54.3 | 2.383 | 2.207 | 2.41 | 3.03 |
+| GOTTLIEB | 25.8 | - | 25.8 | - | 0.22 | - | 2.328 | - | 2.30 | - |
+| METRIS | 21.3 | 3271 | 21.5 | 3418 | 0.19 | 29.4 | 1.927 | 1.369 | 1.92 | 1.64 |
+| CLENSHAW | 0.2 | 8 | 38.0 | 992 | 0.33 | 8.5 | 0.016 | 0.003 | 3.39 | 0.48 |
 
-Paper: Pentium IV 1.3 GHz, Fortran90/77 (LEGENDRE_b: Matlab + DLL), binary I/O included. ORBIT2 = ORBIT1 x 2e6 / 64,440 (paper: x 31.04).
+Paper: Pentium IV 1.3 GHz, Fortran90/77 (LEGENDRE_b: Matlab + DLL), binary I/O included. ORBIT2 = ORBIT1 x 2e6 / 64,440 (paper: x 31.04). GOTTLIEB is not in the paper (added for comparison).

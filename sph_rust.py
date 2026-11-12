@@ -1,5 +1,5 @@
 """
-sph_rust.py -- compiled backend for the five synthesis programmes (crate sph_rs/).
+sph_rust.py -- compiled backend for the six synthesis programmes (crate sph_rs/).
 
 The kernels of sph_core.py are re-written in Rust as scalar, point-by-point loops (the way
 the paper's Fortran90 is organised), so that the timings measure the algorithms and not the
@@ -115,7 +115,7 @@ def run(method, model, lam, phi, r, reps=1, nmax=None):
     Synthesis at scattered points with the compiled kernel of `method`.
 
     Returns a dict: loc (10, K) local-frame quantities (QUANTS order), cart (10, K) or None
-    (native Cartesian output of PINES / METRIS), cpu / wall [s] of the synthesis loop (best of
+    (native Cartesian output of PINES / GOTTLIEB / METRIS), cpu / wall [s] of the synthesis loop (best of
     `reps`), setup [s] (reading the files, recursion tables, METRIS coefficient transforms).
     `nmax` truncates the model to degree nmax inside the binary.
     """
@@ -188,6 +188,10 @@ def _selftest(N=30, K=40, seed=1):
     cp_ = run("PINES", model, lam, phi, r)["cart"]
     cm_ = run("METRIS", model, lam, phi, r)["cart"]
     print(f"PINES vs METRIS (Rust, Cartesian) min digits: {sc.digits(cp_, cm_).min(axis=1).round(1)}")
+    cg_ = run("GOTTLIEB", model, lam, phi, r)["cart"]
+    _, cgn = sc.gottlieb(model, lam, phi, r, cartesian=True)
+    print(f"GOTTLIEB vs PINES (Rust, Cartesian) min digits: {sc.digits(cg_, cp_).min(axis=1).round(1)}")
+    print(f"GOTTLIEB Rust vs NumPy (Cartesian) min digits: {sc.digits(cg_, cgn).min(axis=1).round(1)}")
 
 
 if __name__ == "__main__":

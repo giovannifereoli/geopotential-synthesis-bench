@@ -1,16 +1,17 @@
-//! sph_rs -- compiled (Rust) kernels of the five harmonic-synthesis programmes of
+//! sph_rs -- compiled (Rust) kernels of the harmonic-synthesis programmes of
 //! Fantino & Casotto (2009), J. Geodesy 83:595-619. Same mathematics as sph_core.py, written
 //! point by point with scalar loops (as the paper's Fortran90), no external crates, IEEE
 //! double precision, no fast-math, single thread.
 //!
 //!   sph_rs <METHOD> <coef.bin> <points.bin> <out.bin> [--reps R] [--nmax n] [--grid]
 //!
-//! METHOD: LEGENDRE_a | LEGENDRE_b | PINES | METRIS | CLENSHAW  (--grid: CLENSHAW per parallel)
+//! METHOD: LEGENDRE_a | LEGENDRE_b | PINES | GOTTLIEB | METRIS | CLENSHAW
+//!         (--grid: CLENSHAW per parallel)
 //! coef.bin   : u64 N, f64 gm, f64 a, C[(N+1)^2], S[(N+1)^2]   (row-major [n, m], f64 LE)
 //! points.bin : u64 K, lam[K], phi[K], r[K]                    (rad, rad, m)
 //!   (--grid) : u64 nlon, u64 nlat, f64 r, lon[nlon], lat[nlat]
 //! out.bin    : u64 rows, u64 K, data[rows * K] row-major; rows = 10 (local frame, QUANTS
-//!              order) or 20 (local + Cartesian, CART order) for PINES and METRIS
+//!              order) or 20 (local + Cartesian, CART order) for PINES, GOTTLIEB, METRIS
 //! stdout     : one JSON line {"cpu":..,"wall":..,"setup":..,"K":..,"N":..,"reps":..}
 //!              cpu / wall = best of R repetitions of the synthesis loop only.
 
@@ -539,6 +540,127 @@ impl Pines {
     }
 }
 
+// ------------------------------------------------------------------ 2b. GOTTLIEB
+// Pines' Helmholtz polynomials in Gottlieb's (1993, NASA CR-188243) normalised form: the
+// Cartesian derivatives use d/du Abar_nm = k_nm Abar_n,m+1, d2/du2 Abar_nm = j_nm Abar_n,m+2,
+// so only row n is needed (3 rolling rows, two zero columns past the diagonal).
+struct Gottlieb {
+    rm: Vec<f64>,
+    im: Vec<f64>,
+    rows: Vec<Vec<f64>>,
+}
+
+impl Gottlieb {
+    fn new(n: usize) -> Self {
+        Gottlieb { rm: vec![0.0; n + 3], im: vec![0.0; n + 3], rows: (0..3).map(|_| vec![0.0; n + 3]).collect() }
+    }
+
+    /// Cartesian quantities (CART order).
+    fn eval(&mut self, md: &Model, lam: f64, phi: f64, r: f64) -> [f64; 10] {
+        let (nmax, n1, t) = (md.n, md.n1, &md.t);
+        let l = t.l;
+        let (sp, cp) = phi.sin_cos();
+        let (sl, cl) = lam.sin_cos();
+        let (s, tt, u) = (cp * cl, cp * sl, sp);
+        let q = md.a / r;
+        self.rm.fill(0.0);
+        self.im.fill(0.0);
+        self.rm[2] = 1.0;
+        for m in 1..=nmax {
+            self.rm[m + 2] = s * self.rm[m + 1] - tt * self.im[m + 1];
+            self.im[m + 2] = s * self.im[m + 1] + tt * self.rm[m + 1];
+        }
+        for row in self.rows.iter_mut() {
+            row.fill(0.0);
+        }
+        self.rows[0][0] = 1.0;
+        // v gam l j k s t n o h p q r M
+        let mut acc = [0.0f64; 14];
+        let mut w = 1.0f64;
+        for n in 0..=nmax {
+            if n >= 1 {
+                let mut an = std::mem::take(&mut self.rows[n % 3]);
+                {
+                    let a1 = &self.rows[(n + 2) % 3];
+                    let a2 = &self.rows[(n + 1) % 3];
+                    let g = &t.g[n * l..n * l + n];
+                    let h = &t.h[n * l..n * l + n];
+                    for m in 0..n {
+                        an[m] = g[m] * (u * a1[m]) - h[m] * a2[m];
+                    }
+                    an[n] = t.f[n] * a1[n - 1];
+                }
+                self.rows[n % 3] = an;
+            }
+            let e = n + 1;
+            let a0 = &self.rows[n % 3];
+            let kr = &t.k[n * l..n * l + e];
+            let jr = &t.j[n * l..n * l + e];
+            let cn = &md.c[n * n1..n * n1 + e];
+            let sn = &md.s[n * n1..n * n1 + e];
+            let nf = n as f64;
+            let mut o = [0.0f64; 14];
+            for m in 0..e {
+                let fm = m as f64;
+                let (c_, s_) = (cn[m], sn[m]);
+                let (rm, im) = (self.rm[m + 2], self.im[m + 2]);
+                let (rm1, im1) = (self.rm[m + 1], self.im[m + 1]);
+                let (rm2, im2) = (self.rm[m], self.im[m]);
+                let b0 = c_ * rm + s_ * im; //   C r_m + S i_m
+                let b1 = c_ * rm1 + s_ * im1; //  C r_m-1 + S i_m-1
+                let a1 = s_ * rm1 - c_ * im1; // -(C i_m-1 - S r_m-1)
+                let np1 = nf + fm + 1.0;
+                let p0 = a0[m];
+                let pb = p0 * b0;
+                o[0] += pb;
+                o[1] += np1 * pb;
+                o[2] += np1 * (np1 + 1.0) * pb;
+                let mp = fm * p0;
+                let (mb, ma) = (mp * b1, mp * a1);
+                o[3] += mb;
+                o[4] += ma;
+                o[5] += np1 * mb;
+                o[6] += np1 * ma;
+                let mm1 = (fm - 1.0) * mp;
+                o[7] += mm1 * (c_ * rm2 + s_ * im2);
+                o[8] += mm1 * (c_ * im2 - s_ * rm2);
+                let zg = kr[m] * a0[m + 1];
+                let zb = zg * b0;
+                o[9] += zb;
+                o[10] += np1 * zb;
+                o[11] += fm * zg * b1;
+                o[12] += fm * zg * a1;
+                o[13] += jr[m] * a0[m + 2] * b0;
+            }
+            for i in 0..14 {
+                acc[i] += w * o[i];
+            }
+            w *= q;
+        }
+        let [sv, sgam, sl_, sj, sk, ss, st, sn_, so, sh, spp, sq, sr, sm] = acc;
+        let lam_ = sgam + u * sh;
+        let d1 = ss + u * sq;
+        let d2 = st + u * sr;
+        let gg = -(spp + sh + u * sm);
+        let ff = sl_ + lam_ + u * (spp + sh - gg);
+        let mu = md.gm;
+        let (m1, m2) = (mu / r, mu / (r * r));
+        let m3 = m2 / r;
+        [
+            m1 * sv,
+            m2 * (sj - lam_ * s),
+            m2 * (sk - lam_ * tt),
+            m2 * (sh - lam_ * u),
+            m3 * ((ff * s - 2.0 * d1) * s - lam_ + sn_),
+            m3 * ((ff * tt - d2) * s - d1 * tt - so),
+            m3 * ((ff * s - d1) * u + gg * s + sq),
+            m3 * ((ff * tt - 2.0 * d2) * tt - lam_ - sn_),
+            m3 * ((ff * tt - d2) * u + gg * tt + sr),
+            m3 * ((ff * u + 2.0 * gg) * u - lam_ + sm),
+        ]
+    }
+}
+
 // ------------------------------------------------------------------ 3. METRIS
 struct Metris {
     l: usize,
@@ -672,13 +794,19 @@ impl Metris {
             let e = n + 1;
             let er = &self.er[n * l * 10..(n * l + e) * 10];
             let ei = &self.ei[n * l * 10..(n * l + e) * 10];
+            // partial sum per degree, then into the total: N+3 additions into f instead of
+            // ~N^2/2 (a single running accumulator costs about one digit at N = 360)
+            let mut s = [0.0f64; 10];
             for m in 0..e {
                 let (yr_, yi_) = (r0[m], i0[m]);
                 let cr = &er[m * 10..m * 10 + 10];
                 let ci = &ei[m * 10..m * 10 + 10];
                 for qi in 0..10 {
-                    f[qi] += yr_ * cr[qi] - yi_ * ci[qi];
+                    s[qi] += yr_ * cr[qi] - yi_ * ci[qi];
                 }
+            }
+            for qi in 0..10 {
+                f[qi] += s[qi];
             }
             self.yr[n % 3] = r0;
             self.yi[n % 3] = i0;
@@ -840,7 +968,7 @@ fn main() {
         lat1 = vec![];
         rgrid = 0.0;
     }
-    let has_cart = !grid && (method == "PINES" || method == "METRIS");
+    let has_cart = !grid && (method == "PINES" || method == "GOTTLIEB" || method == "METRIS");
     let rows = if has_cart { 20 } else { 10 };
     let mut out = vec![0.0f64; rows * k];
     let mut metris = if method == "METRIS" { Some(Metris::new(&md)) } else { None };
@@ -900,6 +1028,17 @@ fn main() {
                 }
                 "PINES" => {
                     let mut w = Pines::new(md.n);
+                    for p in 0..k {
+                        let cart = w.eval(&md, lam[p], phi[p], rad[p]);
+                        let v = cart_to_local(&cart, lam[p], phi[p]);
+                        for qi in 0..10 {
+                            out[qi * k + p] = v[qi];
+                            out[(10 + qi) * k + p] = cart[qi];
+                        }
+                    }
+                }
+                "GOTTLIEB" => {
+                    let mut w = Gottlieb::new(md.n);
                     for p in 0..k {
                         let cart = w.eval(&md, lam[p], phi[p], rad[p]);
                         let v = cart_to_local(&cart, lam[p], phi[p]);

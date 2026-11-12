@@ -1,10 +1,10 @@
 """
-sph_accuracy.py -- numerical accuracy of the five synthesis programmes (Sect. 7.3 of Fantino &
+sph_accuracy.py -- numerical accuracy of the synthesis programmes (Sect. 7.3 of Fantino &
 Casotto 2009) and the instability of Pines' original recursion (Fig. 3).
 
 Exact identities checked:
 
-    Eq. 31  Laplace          V_ll + V_pp + V_rr = 0             (all five programmes)
+    Eq. 31  Laplace          V_ll + V_pp + V_rr = 0             (all programmes)
     Eq. 32  sum_nm Pbar_nm^2           = (N + 1)^2              (fnALFs of LEGENDRE_a)
     Eq. 33  sum_nm (dPbar_nm/dphi)^2   = N (N + 1)^2 (N + 2) / 4
 
@@ -106,7 +106,7 @@ def fig_laplace(loc, lap, name="fig_accuracy_laplace"):
     lo = min(ax.get_ylim()[0] for ax in axes)
     a1.set_ylim(max(lo, 1e-26), 1e-17)
     a2.set_ylim(1e-20, 1e-13)
-    fig.legend(*a1.get_legend_handles_labels(), loc="outside upper center", ncol=6)
+    fig.legend(*a1.get_legend_handles_labels(), loc="outside upper center", ncol=4)
     ss.save_figure(fig, name)
 
 

@@ -1,5 +1,5 @@
 """
-sph_core.py -- the five spherical-harmonic synthesis programmes of
+sph_core.py -- the spherical-harmonic synthesis programmes of
 
     G. Fantino & S. Casotto (2009), "Methods of harmonic synthesis for global geopotential
     models and their first-, second- and third-order gradients", J. Geodesy 83:595-619
@@ -12,6 +12,9 @@ re-implemented in NumPy so that their precision, accuracy and relative speed can
     LEGENDRE_b  the same algorithm called point by point from an interpreted loop, with
                 whole-triangle array operations per point (PoliMi DLL under Matlab)
     PINES       FCR on fully normalised Helmholtz polynomials, Cartesian (Pines 1973)
+    GOTTLIEB    the same Helmholtz polynomials in Gottlieb's (1993) normalised form: the
+                derivatives use d/du Abar_nm ~ Abar_n,m+1, so only row n is needed
+                (not in the paper; added for comparison, NASA CR-188243)
     METRIS      recursion on fully normalised solid spherical harmonics, the derivatives
                 obtained by acting on the coefficients (Metris et al. 1999), Cartesian
     CLENSHAW    Clenshaw summation over the degree on fnALFs, either for scattered points
@@ -25,9 +28,10 @@ All routines return the ten quantities of the paper in the local north-oriented 
 
     V, V_lambda, V_phi, V_r, V_lambda lambda, V_lambda phi, V_phi phi, V_lambda r, V_phi r, V_rr
 
-PINES and METRIS also return the Cartesian quantities (order CART) with cartesian=True.
+PINES, GOTTLIEB and METRIS also return the Cartesian quantities (order CART) with
+cartesian=True.
 
-Run `python sph_core.py` for a self-test (all five programmes agree at N = 30, Laplace).
+Run `python sph_core.py` for a self-test (all six programmes agree at N = 30, Laplace).
 """
 
 import os
@@ -48,7 +52,8 @@ GM_EARTH = 3.986004415e14  # [m^3 s^-2]  (EGM96)
 A_EARTH = 6378136.3  # [m]
 J2_EARTH = 1.0826266835531513e-3  # = -sqrt(5) * C20bar
 
-METHODS = ("LEGENDRE_a", "LEGENDRE_b", "PINES", "METRIS", "CLENSHAW")
+METHODS = ("LEGENDRE_a", "LEGENDRE_b", "PINES", "GOTTLIEB", "METRIS", "CLENSHAW")
+CART_METHODS = ("PINES", "GOTTLIEB", "METRIS")  # native Cartesian output
 QUANTS = ("V", "Vl", "Vp", "Vr", "Vll", "Vlp", "Vpp", "Vlr", "Vpr", "Vrr")
 CART = ("V", "Vx", "Vy", "Vz", "Vxx", "Vxy", "Vxz", "Vyy", "Vyz", "Vzz")
 QUANT_TEX = {
@@ -63,7 +68,7 @@ QUANT_TEX = {
 QUANT_UNIT = {"V": r"m$^2$\,s$^{-2}$", "g": r"m\,s$^{-2}$", "T": r"s$^{-2}$"}
 
 # default number of points per vectorised block (memory ~ chunk * N * 8 B * #arrays)
-DEFAULT_CHUNK = {"LEGENDRE_a": 256, "PINES": 256, "METRIS": 1024, "CLENSHAW": 256}
+DEFAULT_CHUNK = {"LEGENDRE_a": 256, "PINES": 256, "GOTTLIEB": 256, "METRIS": 1024, "CLENSHAW": 256}
 
 
 # ============================================================
@@ -590,6 +595,135 @@ def pines(model, lam, phi, r, dtype=np.float64, chunk=None, cartesian=False):
 
 
 # ============================================================
+# 2b. GOTTLIEB -- Helmholtz polynomials, row n only (Gottlieb 1993, NASA CR-188243)
+# ============================================================
+def _gottlieb_coef(model, dtype):
+    """Per-degree weight matrices of Gottlieb's 14 sums (the (n+m+1), (n+m+2), m, k, j factors
+    are folded into the coefficients, so the inner loop is a handful of dot products)."""
+    key = ("gottlieb", np.dtype(dtype).name)
+    if key not in model._cache:
+        C, S = model.coef(dtype)
+        T = tables(model.N, dtype)
+        out = []
+        for n in range(model.N + 1):
+            e = n + 1
+            m = np.arange(e).astype(dtype)
+            c, s = C[n, :e], S[n, :e]
+            k, j = T["k"][n, :e], T["j"][n, :e]
+            a, b = n + m + 1, n + m + 2
+            mm1 = m * (m - 1)
+            st = lambda *cols: np.ascontiguousarray(np.stack(cols, -1))
+            out.append((
+                st(c, a * c, a * b * c), st(s, a * s, a * b * s),           # Abar_nm  x (r_m, i_m)
+                st(m * c, m * s, a * m * c, a * m * s),                       # Abar_nm  x (r_m-1)
+                st(m * s, -m * c, a * m * s, -a * m * c),                     # Abar_nm  x (i_m-1)
+                st(mm1 * c, -mm1 * s), st(mm1 * s, mm1 * c),                  # Abar_nm  x (r_m-2, i_m-2)
+                st(k * c, a * k * c), st(k * s, a * k * s),                   # Abar_n,m+1 x (r_m, i_m)
+                st(m * k * c, m * k * s), st(m * k * s, -m * k * c),          # Abar_n,m+1 x (r_m-1, i_m-1)
+                st(j * c), st(j * s),                                         # Abar_n,m+2 x (r_m, i_m)
+            ))
+        model._cache[key] = out
+    return model._cache[key]
+
+
+def _gottlieb_block(model, lam, phi, r, dtype):
+    """
+    Gottlieb's (1993) normalised form of the Pines/Helmholtz algorithm. Same derived ALFs
+    Abar_nm(u) and the same (s + i t)^m as PINES, but the Cartesian derivatives are written with
+    d/du Abar_nm = k_nm Abar_n,m+1 and d2/du2 Abar_nm = j_nm Abar_n,m+2, i.e. only row n is needed
+    (no Abar_n+1, Abar_n+2). Per degree, 14 sums (Gottlieb's names):
+
+      v   = sum Abar B          gam = sum (n+m+1) Abar B     l = sum (n+m+1)(n+m+2) Abar B
+      j,k = sum m Abar (B', -A') s,t = (n+m+1) x (j, k)      n,o = sum m(m-1) Abar (B'', -A'')
+      h   = sum k Abar_m+1 B    p   = sum (n+m+1) k Abar_m+1 B
+      q,r = sum m k Abar_m+1 (B', -A')                      M   = sum j Abar_m+2 B
+
+    with B = C r_m + S i_m, B' = C r_m-1 + S i_m-1, A' = C i_m-1 - S r_m-1 (and '' for m-2),
+    all weighted by (a/r)^n. Then, with Lambda = gam + u h:
+
+      grad V   = mu/r^2 [(j, k, h) - Lambda x^]
+      V_ij     = mu/r^3 [F_ij - delta_ij Lambda - x^_i Q_j - x^_j Q_i + x^_i x^_j Ff]
+      F        = [[n, -o, q], [-o, -n, r], [q, r, M]],  Q = (s + u q, t + u r, p + h + u M)
+      Ff       = l + Lambda + u (2 p + 2 h + u M)
+
+    (Gottlieb's Ada routine Gotpot; derived independently here and checked against PINES/METRIS.)
+    """
+    N, mu = model.N, model.gm
+    T = tables(N, dtype)
+    W = _gottlieb_coef(model, dtype)
+    f, g, h = T["f"], T["g"], T["h"]
+    K = lam.size
+    cp = np.cos(phi)
+    s, t, u = cp * np.cos(lam), cp * np.sin(lam), np.sin(phi)
+    q = model.a / r
+    RM = np.zeros((K, N + 3), dtype)
+    IM = np.zeros((K, N + 3), dtype)
+    RM[:, 2] = 1.0
+    for m in range(1, N + 1):
+        RM[:, m + 2] = s * RM[:, m + 1] - t * IM[:, m + 1]
+        IM[:, m + 2] = s * IM[:, m + 1] + t * RM[:, m + 1]
+    # Helmholtz row n in 3 rolling buffers, two zero columns past the diagonal
+    L = N + 3
+    A = [np.zeros((K, L), dtype) for _ in range(3)]
+    A[0][:, 0] = 1.0
+    ucol = u[:, None]
+    acc = np.zeros((K, 14), dtype)
+    w = np.ones(K, dtype)[:, None]
+    for n in range(N + 1):
+        e = n + 1
+        if n >= 1:
+            An, A1, A2 = A[n % 3], A[(n - 1) % 3], A[(n - 2) % 3]
+            An[:, :n] = g[n, :n] * (ucol * A1[:, :n]) - h[n, :n] * A2[:, :n]
+            An[:, n] = f[n] * A1[:, n - 1]
+        Ar = A[n % 3]
+        A0, B1, B2 = Ar[:, :e], Ar[:, 1 : e + 1], Ar[:, 2 : e + 2]
+        rm, im = RM[:, 2 : e + 2], IM[:, 2 : e + 2]
+        rm1, im1 = RM[:, 1 : e + 1], IM[:, 1 : e + 1]
+        rm2, im2 = RM[:, :e], IM[:, :e]
+        w0r, w0i, w01r, w01i, w02r, w02i, w1r, w1i, w11r, w11i, w2r, w2i = W[n]
+        o = np.concatenate([
+            (A0 * rm) @ w0r + (A0 * im) @ w0i,          # v, gam, l
+            (A0 * rm1) @ w01r + (A0 * im1) @ w01i,      # j, k, s, t
+            (A0 * rm2) @ w02r + (A0 * im2) @ w02i,      # n, o
+            (B1 * rm) @ w1r + (B1 * im) @ w1i,          # h, p
+            (B1 * rm1) @ w11r + (B1 * im1) @ w11i,      # q, r
+            (B2 * rm) @ w2r + (B2 * im) @ w2i,          # M
+        ], axis=1)
+        acc += w * o
+        w = w * q[:, None]
+    (Sv, Sgam, Sl, Sj, Sk, Ss, St, Sn, So, Sh, Sp, Sq, Sr, Sm) = acc.T
+    Lam = Sgam + u * Sh
+    D1 = Ss + u * Sq
+    D2 = St + u * Sr
+    Gg = -(Sp + Sh + u * Sm)
+    Ff = Sl + Lam + u * (Sp + Sh - Gg)
+    m1, m2, m3 = mu / r, mu / (r * r), mu / (r * r * r)
+    out = np.empty((10, K), dtype)
+    out[0] = m1 * Sv
+    out[1] = m2 * (Sj - Lam * s)
+    out[2] = m2 * (Sk - Lam * t)
+    out[3] = m2 * (Sh - Lam * u)
+    out[4] = m3 * ((Ff * s - 2 * D1) * s - Lam + Sn)
+    out[5] = m3 * ((Ff * t - D2) * s - D1 * t - So)
+    out[6] = m3 * ((Ff * s - D1) * u + Gg * s + Sq)
+    out[7] = m3 * ((Ff * t - 2 * D2) * t - Lam - Sn)
+    out[8] = m3 * ((Ff * t - D2) * u + Gg * t + Sr)
+    out[9] = m3 * ((Ff * u + 2 * Gg) * u - Lam + Sm)
+    return out
+
+
+def gottlieb(model, lam, phi, r, dtype=np.float64, chunk=None, cartesian=False):
+    """GOTTLIEB: Pines' Helmholtz formulation in Gottlieb's (1993) normalised form, Cartesian."""
+    lam, phi, r = (_as(x, dtype) for x in np.broadcast_arrays(lam, phi, r))
+    chunk = chunk or DEFAULT_CHUNK["GOTTLIEB"]
+    cart = np.empty((10, lam.size), dtype)
+    for sl in _chunks(lam.size, chunk):
+        cart[:, sl] = _gottlieb_block(model, lam[sl], phi[sl], r[sl], dtype)
+    loc = cart_to_local(cart, lam, phi)
+    return (loc, cart) if cartesian else loc
+
+
+# ============================================================
 # 3. METRIS -- solid spherical harmonics, derivatives acting on the coefficients
 # ============================================================
 def _metris_op(E, kind, T):
@@ -801,14 +935,14 @@ def clenshaw_grid(model, lam1d, phi1d, r, dtype=np.float64):
 # DISPATCH
 # ============================================================
 _FUNCS = {"LEGENDRE_a": legendre_a, "LEGENDRE_b": legendre_b, "PINES": pines,
-          "METRIS": metris, "CLENSHAW": clenshaw}
+          "GOTTLIEB": gottlieb, "METRIS": metris, "CLENSHAW": clenshaw}
 
 
 def synthesize(method, model, lam, phi, r, dtype=np.float64, chunk=None, cartesian=False):
     """Local quantities (10, K) of `method`; with cartesian=True also the Cartesian (10, K)
-    (native for PINES/METRIS, rotated from the local frame for the spherical codes)."""
+    (native for PINES/GOTTLIEB/METRIS, rotated from the local frame for the spherical codes)."""
     fn = _FUNCS[method]
-    if method in ("PINES", "METRIS"):
+    if method in CART_METHODS:
         return fn(model, lam, phi, r, dtype=dtype, chunk=chunk, cartesian=cartesian)
     loc = fn(model, lam, phi, r, dtype=dtype, chunk=chunk)
     if not cartesian:
@@ -929,6 +1063,10 @@ def _selftest(N=30, K=40, seed=1):
     _, cp_ = pines(model, lam, phi, r, cartesian=True)
     _, cm_ = metris(model, lam, phi, r, cartesian=True)
     print(f"PINES vs METRIS (Cartesian) min digits: {digits(cp_, cm_).min(axis=1).round(1)}")
+    _, cg_ = gottlieb(model, lam, phi, r, cartesian=True)
+    print(f"GOTTLIEB vs PINES (Cartesian) min digits: {digits(cg_, cp_).min(axis=1).round(1)}")
+    lapc = np.abs(cg_[4] + cg_[7] + cg_[9]).max()
+    print(f"GOTTLIEB Cartesian |trace| {lapc:.1e} s^-2")
     # finite-difference check of the radial derivatives
     dr = 1.0
     vp = legendre_a(model, lam, phi, r + dr)
