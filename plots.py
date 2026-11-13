@@ -1,5 +1,5 @@
 """
-plots.py -- the four figures, drawn only from the saved result tables (no Rust, no rerun).
+plots.py -- the figures, drawn only from the saved result tables (no Rust, no rerun).
 
     python plots.py              # results/accuracy.csv, timing.csv -> results/fig_*.pdf
     python plots.py my_results   # another results folder (e.g. one written with benchmark.py --out)
@@ -20,8 +20,12 @@ All methods on one axis, one panel per output (one colour and marker per method)
                         each curve is labelled at its right end
 CPU times: the cost of a point does not depend on where the point is, so the three point sets are three
 repeat measurements of the same quantity. Curves show their median, shaded bands / bars their range.
+Only when the folder holds simd.csv (benchmark.py --phase simd):
+  fig_simd.pdf          speed-up from LLVM auto-vectorization, one panel per method
+A folder timed with the auto-vectorized build (meta.json) says so in the titles of the CPU-time figures.
 """
 
+import json
 import math
 import shutil
 import statistics
@@ -31,6 +35,10 @@ from pathlib import Path
 from benchmark import GATE_ABS, LEVELS, METHODS, read_csv
 
 REF = "LEGENDRE_a"                                    # the speed reference
+# Fixed axis ranges for the speed figures, the same for every build and run, so that figures
+# of different runs can be compared by eye (widened only if some data falls outside).
+RATIO_LIM = (0.58, 2.8)                               # CPU time / CPU time of REF
+ABS_LIM = (0.1, 2e4)                                  # CPU time per point of REF [us]
 MUTED, LIGHT, BAND = "#52514e", "#e1e0d9", "#ecebe6"
 STYLE = {1: dict(color="#2a78d6", ls="-", marker="o", ms=3.2, lw=1.4, label="Acceleration"),
          2: dict(color="#eb6834", ls="--", marker="s", ms=3.0, lw=1.4, label="Acceleration + gravity gradient")}
@@ -39,7 +47,14 @@ INK = "#0b0b0b"
 # fig_compare: one colour + marker per method (validated categorical palette, fixed order)
 CMP = [("LEAR", "#2a78d6", "o"), ("METRIS", "#eb6834", "s"), ("CLENSHAW", "#1baf7a", "^"),
        ("PINES", "#eda100", "D"), ("GOTTLIEB", "#e87ba4", "v"), ("LEGENDRE_b", "#008300", "P"),
-       ("HOLMES", "#6250d6", "h")]
+       ("HOLMES", "#6250d6", "h"), ("CUNNINGHAM", "#e34948", "*")]
+
+
+def msz(mk):
+    """Marker size; the star reads smaller than the other shapes at equal size."""
+    return 6.0 if mk == "*" else 3.8
+
+
 N_TICKS = (10, 100, 1000)
 
 
@@ -132,7 +147,7 @@ def overflow_note(missing):
     return ", ".join(" and ".join(ms) + f" from $N = {n}$" for n, ms in sorted(by_n.items()))
 
 
-def speed_all(folder, t, Ns, tt):
+def speed_all(folder, t, Ns, tt, note=""):
     """fig_speed_all.pdf: all methods on one axis per output, CPU time relative to LEGENDRE_a
     (median over the three point sets; vertical bars = their range)."""
     import matplotlib.pyplot as plt
@@ -156,12 +171,12 @@ def speed_all(folder, t, Ns, tt):
                 missing[m] = Ns[Ns.index(pts[-1][0]) + 1]
             ax.vlines([N for N, _ in q], [d["r_lo"] for _, d in q], [d["r_hi"] for _, d in q],
                       color=c, lw=0.9, alpha=0.55, zorder=2.5)
-            ax.plot(*zip(*pts), color=c, marker=mk, ms=3.8, lw=1.4, mec="white", mew=0.5, zorder=3)
+            ax.plot(*zip(*pts), color=c, marker=mk, ms=msz(mk), lw=1.4, mec="white", mew=0.5, zorder=3)
             ends.append((m, mk, *pts[-1], c))
             vals += [d["r_lo"] for _, d in q] + [d["r_hi"] for _, d in q]
-        ylo, yhi = min(vals) / 1.05, max(vals) * 1.05
+        ylo, yhi = min(RATIO_LIM[0], min(vals) / 1.05), max(RATIO_LIM[1], max(vals) * 1.05)
         ax.set_ylim(ylo, yhi)
-        log_axis(ax.yaxis, [v for v in (0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 2, 2.5, 3, 4) if ylo <= v <= yhi],
+        log_axis(ax.yaxis, [v for v in (0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 2, 2.5, 3, 4) if ylo <= v <= yhi],
                  lambda v: f"{v:g}")
         # direct labels at the right: marker + name, joined to the end of each curve by a thin leader
         frac = lambda y: (math.log(y) - math.log(ylo)) / (math.log(yhi) - math.log(ylo))
@@ -173,7 +188,7 @@ def speed_all(folder, t, Ns, tt):
                         arrowprops=dict(arrowstyle="-", color=c, lw=0.6, ls=":",
                                         shrinkA=3, shrinkB=0))
             if mk:
-                ax.plot([xm], [p], transform=tr, marker=mk, color=c, ms=3.8, mec="white", mew=0.5, clip_on=False)
+                ax.plot([xm], [p], transform=tr, marker=mk, color=c, ms=msz(mk), mec="white", mew=0.5, clip_on=False)
             ax.text(xm * 1.22, p, tt(m), transform=tr, va="center", ha="left", fontsize=7, color=INK)
         ax.set_title(title, loc="left")
         ax.set_xlabel("Maximum degree $N$")
@@ -187,9 +202,51 @@ def speed_all(folder, t, Ns, tt):
         handles.append(Line2D([], [], ls="none", label="Curves stop where a method overflows: " + overflow_note(missing)))
     fig.legend(handles=handles, loc="outside lower center", ncol=1, frameon=False, handlelength=1.6,
                labelspacing=0.3)
-    fig.suptitle("CPU time per point relative to " + tt(REF) + " (median over the three point sets; below 1 = faster)",
-                 fontsize=8)
+    fig.suptitle("CPU time per point relative to " + tt(REF) + " (median over the three point sets; below 1 = faster)"
+                 + note, fontsize=8)
     fig.savefig(folder / "fig_speed_all.pdf")
+    plt.close(fig)
+
+
+def simd_fig(folder, tt):
+    """fig_simd.pdf: CPU time of the scalar build / CPU time of the auto-vectorized build, per method
+    (simd.csv: both builds timed side by side on ORBIT1; band = 95% bootstrap interval)."""
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
+    rows = read_csv(folder / "simd.csv")
+    Ns = sorted({r["N"] for r in rows})
+    ylo = min(0.8, min(r["ci_lo"] for r in rows) / 1.05)
+    yhi = max(1.25, max(r["ci_hi"] for r in rows) * 1.12)
+    fig = plt.figure(figsize=(7.16, 5.2), layout="constrained")
+    grid = fig.subfigures(1, 1)
+    axs = grid.subplots(3, 3, sharex=True, sharey=True)
+    for ax, m in zip(axs.flat, METHODS):
+        frame(ax, Ns)
+        ax.set_yscale("log")
+        ax.set_ylim(ylo, yhi)
+        log_axis(ax.yaxis, [v for v in (0.8, 0.9, 1, 1.25, 1.5, 2, 2.5, 3) if ylo <= v <= yhi], lambda v: f"{v:g}")
+        ax.axhline(1, color=MUTED, lw=0.6)
+        for lev in LEVELS:
+            q = sorted((r for r in rows if r["method"] == m and r["level"] == lev), key=lambda r: r["N"])
+            if q:
+                ax.fill_between([r["N"] for r in q], [r["ci_lo"] for r in q], [r["ci_hi"] for r in q],
+                                color=STYLE[lev]["color"], alpha=0.2, lw=0)
+                ax.plot([r["N"] for r in q], [r["speedup"] for r in q], **STYLE[lev])
+        bad = [N for N in Ns if not any(r["method"] == m and r["N"] == N for r in rows)]
+        if bad:
+            ax.plot(bad, [yhi / 1.09] * len(bad), **OVF)
+        ax.set_title(tt(m))
+    fig.legend(handles=[Line2D([], [], **STYLE[1]), Line2D([], [], **STYLE[2]),
+                        Patch(fc=MUTED, alpha=0.25, ec="none", label=r"95\% interval" if plt.rcParams["text.usetex"]
+                              else "95% interval"),
+                        Line2D([], [], **{**OVF, "label": "Overflow, not timed"})],
+               loc="outside lower center", ncol=4, frameon=False, handlelength=2.6, columnspacing=1.6)
+    grid.supxlabel("Maximum degree $N$", fontsize=8)
+    grid.supylabel("CPU time without / with auto-vectorization", fontsize=8)
+    fig.suptitle("Speed-up from LLVM auto-vectorization (above 1 = faster with it, below 1 = slower; "
+                 "both builds timed side by side)", fontsize=8)
+    fig.savefig(folder / "fig_simd.pdf")
     plt.close(fig)
 
 
@@ -220,11 +277,11 @@ def accuracy_all(folder, gate, Ns, tt):
                 continue
             drawn.append((pts, [m], c, mk))
         for pts, names, c, mk in drawn:
-            ax.plot(*zip(*pts), color=c, marker=mk, ms=3.8, lw=1.3, mec="white", mew=0.5, zorder=3)
+            ax.plot(*zip(*pts), color=c, marker=mk, ms=msz(mk), lw=1.3, mec="white", mew=0.5, zorder=3)
         ax.set_title(title, loc="left")
         ax.set_xlabel("Maximum degree $N$")
         if not handles:
-            handles = [Line2D([], [], color=c, marker=mk, ms=3.8, lw=1.3, mec="white", mew=0.5,
+            handles = [Line2D([], [], color=c, marker=mk, ms=msz(mk), lw=1.3, mec="white", mew=0.5,
                               label=", ".join(tt(n) for n in names) + (" (identical)" if len(names) > 1 else ""))
                        for _, names, c, mk in drawn]
     lo, hi = axs[0].get_ylim()
@@ -249,11 +306,13 @@ def figures(folder):
     gate = read_csv(folder / "accuracy.csv")
     trows = read_csv(folder / "timing.csv")
     Ns = sorted({r["N"] for r in gate})
+    meta = json.loads((folder / "meta.json").read_text()) if (folder / "meta.json").exists() else {}
+    note = "; auto-vectorized build" if meta.get("build", {}).get("name") == "simd" else ""
 
     # ---- accuracy: worst case over all points of the three sets; overflow = Inf/NaN in any output
-    fig = plt.figure(figsize=(7.16, 4.1), layout="constrained")
+    fig = plt.figure(figsize=(7.16, 5.4), layout="constrained")
     grid = fig.subfigures(1, 1)                       # own subfigure, so its x label does not collide with the legend
-    axs = grid.subplots(2, 4, sharex=True, sharey=True)
+    axs = grid.subplots(3, 3, sharex=True, sharey=True)
     top = GATE_ABS * 4
     for ax, m in zip(axs.flat, METHODS):
         frame(ax, Ns)
@@ -294,7 +353,9 @@ def figures(folder):
         ax.fill_between([N for N, _ in q], [d["t_lo"] for _, d in q], [d["t_hi"] for _, d in q],
                         color=STYLE[lev]["color"], alpha=0.2, lw=0)
         ax.plot([N for N, _ in q], [d["t"] for _, d in q], **STYLE[lev])
-    lo, hi = ax.get_ylim()
+    lo = min(ABS_LIM[0], min(d["t_lo"] for (m, _, _), d in t.items() if m == REF) / 1.2)
+    hi = max(ABS_LIM[1], max(d["t_hi"] for (m, _, _), d in t.items() if m == REF) * 1.2)
+    ax.set_ylim(lo, hi)
     log_axis(ax.yaxis, [v for v in (0.1, 1, 10, 100, 1000, 10000) if lo <= v <= hi], lambda v: f"{v:g}")
     ax.set_xlabel("Maximum degree $N$")
     ax.set_ylabel(r"CPU time per point [$\mu$s]")
@@ -305,13 +366,14 @@ def figures(folder):
     for ax in axs.flat[len(others):]:                 # empty cell: show the x tick labels of the panel above
         ax.axis("off")
         axs[0, -1].xaxis.set_tick_params(labelbottom=True)
-    ylo = min(0.8, min(d["r_lo"] for (m, _, _), d in t.items() if m in others) / 1.06)
-    yhi = max(1.25, max(d["r_hi"] for (m, _, _), d in t.items() if m in others) * 1.12)
+    ylo = min(RATIO_LIM[0], min(d["r_lo"] for (m, _, _), d in t.items() if m in others) / 1.06)
+    yhi = max(RATIO_LIM[1], max(d["r_hi"] for (m, _, _), d in t.items() if m in others) * 1.12)
     for ax, m in zip(axs.flat, others):
         frame(ax, Ns)
         ax.set_yscale("log")
         ax.set_ylim(ylo, yhi)
-        log_axis(ax.yaxis, [v for v in (0.8, 1, 1.25, 1.5, 2, 2.5, 3, 4) if ylo <= v <= yhi], lambda v: f"{v:g}")
+        log_axis(ax.yaxis, [v for v in (0.6, 0.8, 1, 1.25, 1.5, 2, 2.5, 3, 4) if ylo <= v <= yhi],
+                 lambda v: f"{v:g}")
         ax.axhspan(1 / 1.05, 1.05, color=BAND, lw=0, zorder=0)
         ax.axhline(1, color=MUTED, lw=0.6)
         for lev in LEVELS:
@@ -326,7 +388,7 @@ def figures(folder):
         ax.set_title(tt(m))
     right.supxlabel("Maximum degree $N$", fontsize=8)
     right.supylabel("CPU time / CPU time of " + tt(REF), fontsize=8)
-    right.suptitle("(b) Other methods relative to " + tt(REF) + " (below 1 = faster)", fontsize=8,
+    right.suptitle("(b) Other methods relative to " + tt(REF) + " (below 1 = faster)" + note, fontsize=8,
                    x=0.02, ha="left")
     fig.legend(handles=[Line2D([], [], **STYLE[1]), Line2D([], [], **STYLE[2]),
                         Patch(fc=BAND, ec="none", label=r"Within 5\% of " + tt(REF) if plt.rcParams["text.usetex"]
@@ -337,8 +399,10 @@ def figures(folder):
     fig.savefig(folder / "fig_speed.pdf")
     plt.close(fig)
 
-    speed_all(folder, t, Ns, tt)
+    speed_all(folder, t, Ns, tt, note)
     accuracy_all(folder, gate, Ns, tt)
+    if (folder / "simd.csv").exists():
+        simd_fig(folder, tt)
 
 
 if __name__ == "__main__":

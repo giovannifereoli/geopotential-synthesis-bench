@@ -23,7 +23,8 @@
 //! gradient and tensor cancel analytically (same recursion, ~2 extra multiplies per term);
 //! LEAR uses Pbar_nm / cos(phi) at level 1 and adds Pbar_nm / cos(phi)^2 at level 2 (see LEAR);
 //! HOLMES recurs on Pbar_nm / cos(phi)^m and keeps the negative powers of cos(phi) of the
-//! derivatives in separate Horner chains (see HOLMES).
+//! derivatives in separate Horner chains (see HOLMES). PINES, GOTTLIEB, METRIS and CUNNINGHAM are
+//! Cartesian and have no singularity.
 
 use crate::{clock_gettime, load_model, metris_op, rd_f64, rd_u64, Model, Tables, Timespec};
 use std::fs;
@@ -1259,9 +1260,226 @@ impl Kernel for Hf {
     }
 }
 
+// ------------------------------------------------------------------ CUNNINGHAM (Montenbruck & Gill)
+// Cunningham (1970) as given by Montenbruck & Gill (2000), Satellite Orbits, Sect. 3.2.4-3.2.5,
+// in fully normalised form. Solid harmonics Y_nm = V_nm + i W_nm = (a/r)^(n+1) Pbar_nm e^(i m lambda)
+// by the same recursion as METRIS (Cartesian, pole-safe). Unlike METRIS, the coefficients are used
+// as they are: each term of degree n and order m is formed directly from Y_n+1,m-1 .. Y_n+1,m+1,
+// as in M&G's Eq. (3.33). With K = C - iS, R(j) = Re K Y_j, I(j) = Im K Y_j (rows n+1, n+2):
+//   D+ Y_nm = -b Y_n+1,m+1,  D- Y_nm = c Y_n+1,m-1 (m >= 1) or -b conj(Y_n+1,1) (m = 0),
+//   d/dz Y_nm = -e Y_n+1,m,  D+- = d/dx +- i d/dy,  d/dx = (D+ + D-)/2,  d/dy = (D+ - D-)/(2i);
+//   ax = [c R(m-1) - b R(m+1)] / 2,  ay = -[b I(m+1) + c I(m-1)] / 2,  az = -e R(m)  (m >= 1),
+//   b = g1 sqrt((n+m+1)(n+m+2)), c = g1 sqrt(k (n-m+1)(n-m+2)) (k = 2 at m = 1, else 1),
+//   e = g1 sqrt((n+m+1)(n-m+1)), g1 = sqrt((2n+1)/(2n+3)); m = 0 has its own short form.
+// Level 2 applies the same operators a second time (rows up to N+2): D+D+, D-D-, D+D- = -d2/dz2
+// and D+- d/dz. Five sums, A (Re of D+D+ + D-D-), B (Im of D+D+ - D-D-), F (d2/dz2), P and Q
+// (Re, Im of d/dz D+-), give xx = A/4 - F/2, yy = -A/4 - F/2, zz = F, xy = B/4, xz = P/2, yz = Q/2.
+// The sum F serves xx, yy and zz because D+D- = -d2/dz2 term by term; the Laplace shortcut
+// (yy = -xx - zz) would save nothing here. The square roots in the factors come from two short
+// 1-D tables, sqrt(k) and sqrt(k (k+1)); g1 and g2 = sqrt((2n+1)/(2n+5)) multiply the partial sums
+// of each degree. No transformed coefficient sets are stored (cf. METRIS).
+pub struct Cunn {
+    yr: [Vec<f64>; 3],
+    yi: [Vec<f64>; 3],
+    sq: Vec<f64>, // sqrt(k)
+    pq: Vec<f64>, // sqrt(k (k+1))
+    g1: Vec<f64>, // sqrt((2n+1)/(2n+3))
+    g2: Vec<f64>, // sqrt((2n+1)/(2n+5))
+}
+impl Cunn {
+    fn new(n: usize) -> Self {
+        let nk = 2 * n + 8;
+        Cunn {
+            yr: std::array::from_fn(|_| vec![0.0; n + 3]),
+            yi: std::array::from_fn(|_| vec![0.0; n + 3]),
+            sq: (0..nk).map(|k| (k as f64).sqrt()).collect(),
+            pq: (0..nk).map(|k| (k as f64 * (k as f64 + 1.0)).sqrt()).collect(),
+            g1: (0..=n).map(|k| ((2.0 * k as f64 + 1.0) / (2.0 * k as f64 + 3.0)).sqrt()).collect(),
+            g2: (0..=n).map(|k| ((2.0 * k as f64 + 1.0) / (2.0 * k as f64 + 5.0)).sqrt()).collect(),
+        }
+    }
+}
+/// Acceleration term of order m >= 1 (row y = Y_n+1, in units of g1/2); kb = sqrt(2) at m = 1, else 1.
+#[inline(always)]
+fn cunn_acc(n: usize, m: usize, cm: f64, sm: f64, yr: &[f64], yi: &[f64], sq: &[f64], pq: &[f64], kb: f64,
+            s: &mut [f64; 8]) {
+    let (b, c) = (pq[n + m + 1], kb * pq[n - m + 1]);
+    let e = 2.0 * (sq[n + m + 1] * sq[n - m + 1]);
+    let rp = cm * yr[m + 1] + sm * yi[m + 1];
+    let ip = cm * yi[m + 1] - sm * yr[m + 1];
+    let rm = cm * yr[m - 1] + sm * yi[m - 1];
+    let im = cm * yi[m - 1] - sm * yr[m - 1];
+    let r0 = cm * yr[m] + sm * yi[m];
+    s[0] += c * rm - b * rp;
+    s[1] -= b * ip + c * im;
+    s[2] -= e * r0;
+}
+/// Gravity-gradient term of order m >= 2 (row y = Y_n+2, in units of g2); kc = sqrt(2) at m = 2, else 1.
+#[inline(always)]
+fn cunn_grad(n: usize, m: usize, cm: f64, sm: f64, yr: &[f64], yi: &[f64], sq: &[f64], pq: &[f64], kc: f64,
+             s: &mut [f64; 8]) {
+    let (u, v) = (pq[n + m + 1], pq[n - m + 1]);
+    let a = u * pq[n + m + 3];
+    let c = kc * (v * pq[n - m + 3]);
+    let ff = u * v;
+    let pz = u * (sq[n - m + 1] * sq[n + m + 3]);
+    let qz = v * (sq[n - m + 3] * sq[n + m + 1]);
+    let r2p = cm * yr[m + 2] + sm * yi[m + 2];
+    let i2p = cm * yi[m + 2] - sm * yr[m + 2];
+    let r2m = cm * yr[m - 2] + sm * yi[m - 2];
+    let i2m = cm * yi[m - 2] - sm * yr[m - 2];
+    let r1p = cm * yr[m + 1] + sm * yi[m + 1];
+    let i1p = cm * yi[m + 1] - sm * yr[m + 1];
+    let r1m = cm * yr[m - 1] + sm * yi[m - 1];
+    let i1m = cm * yi[m - 1] - sm * yr[m - 1];
+    let r0 = cm * yr[m] + sm * yi[m];
+    s[3] += a * r2p + c * r2m;
+    s[4] += a * i2p - c * i2m;
+    s[5] += ff * r0;
+    s[6] += pz * r1p - qz * r1m;
+    s[7] += pz * i1p + qz * i1m;
+}
+impl Kernel for Cunn {
+    #[inline(never)]
+    fn eval<const L2: bool>(&mut self, md: &Model, x: f64, y: f64, z: f64) -> [f64; 9] {
+        const SQRT2: f64 = std::f64::consts::SQRT_2;
+        let t = &md.t;
+        let lt = t.l;
+        let (nmax, n1) = (md.n, md.n1);
+        let lag = 1 + L2 as usize;
+        let nd = nmax + lag;
+        let a = md.a;
+        let (xp, yp, zp) = (x / a, y / a, z / a);
+        let rp2 = xp * xp + yp * yp + zp * zp;
+        let rp = rp2.sqrt();
+        let r2i = 1.0 / rp2;
+        let (zr, zeta_r, zeta_i) = (zp * r2i, xp * r2i, yp * r2i);
+        for k in 0..3 {
+            self.yr[k].fill(0.0);
+            self.yi[k].fill(0.0);
+        }
+        let mut f = [0.0f64; 9];
+        for k in 0..=nd {
+            // row k of the solid harmonics (as METRIS)
+            let mut r0 = std::mem::take(&mut self.yr[k % 3]);
+            let mut i0 = std::mem::take(&mut self.yi[k % 3]);
+            if k == 0 {
+                r0[0] = 1.0 / rp;
+            } else {
+                let r1 = &self.yr[(k + 2) % 3][..k];
+                let i1 = &self.yi[(k + 2) % 3][..k];
+                let r2 = &self.yr[(k + 1) % 3][..k];
+                let i2 = &self.yi[(k + 1) % 3][..k];
+                let g = &t.g[k * lt..k * lt + k];
+                let h = &t.h[k * lt..k * lt + k];
+                {
+                    let (r0n, i0n) = (&mut r0[..k], &mut i0[..k]);
+                    for m in 0..k {
+                        r0n[m] = g[m] * (zr * r1[m]) - h[m] * (r2i * r2[m]);
+                        i0n[m] = g[m] * (zr * i1[m]) - h[m] * (r2i * i2[m]);
+                    }
+                }
+                let (ar, ai) = (r1[k - 1], i1[k - 1]);
+                r0[k] = t.f[k] * (zeta_r * ar - zeta_i * ai);
+                i0[k] = t.f[k] * (zeta_r * ai + zeta_i * ar);
+            }
+            self.yr[k % 3] = r0;
+            self.yi[k % 3] = i0;
+            if k < lag {
+                continue;
+            }
+            // degree n = k - lag: acceleration from row n+1, gradient from row n+2 (= k)
+            let n = k - lag;
+            let nk = 2 * n + 2 + 2 * L2 as usize; // largest index used + 1 (lets the compiler drop bounds checks)
+            let (sq, pq) = (&self.sq[..nk], &self.pq[..nk]);
+            let c = &md.c[n * n1..n * n1 + n + 1];
+            let s = &md.s[n * n1..n * n1 + n + 1];
+            let (y1r, y1i) = (&self.yr[(n + 1) % 3][..n + 2], &self.yi[(n + 1) % 3][..n + 2]);
+            let (y2r, y2i) = if L2 {
+                (&self.yr[(n + 2) % 3][..n + 3], &self.yi[(n + 2) % 3][..n + 3])
+            } else {
+                (&y1r[..0], &y1i[..0])
+            };
+            let mut sm = [0.0f64; 8];
+            // m = 0 (S_n0 = 0)
+            let c0 = c[0];
+            let b0 = SQRT2 * pq[n + 1];
+            sm[0] = -b0 * (c0 * y1r[1]);
+            sm[1] = -b0 * (c0 * y1i[1]);
+            sm[2] = -2.0 * (sq[n + 1] * sq[n + 1]) * (c0 * y1r[0]);
+            if L2 {
+                let a0 = SQRT2 * (pq[n + 1] * pq[n + 3]);
+                let p0 = SQRT2 * (pq[n + 1] * (sq[n + 1] * sq[n + 3]));
+                sm[3] = a0 * (c0 * y2r[2]);
+                sm[4] = a0 * (c0 * y2i[2]);
+                sm[5] = (pq[n + 1] * pq[n + 1]) * (c0 * y2r[0]);
+                sm[6] = p0 * (c0 * y2r[1]);
+                sm[7] = p0 * (c0 * y2i[1]);
+            }
+            if n >= 1 {
+                // m = 1
+                let (cm, sn) = (c[1], s[1]);
+                cunn_acc(n, 1, cm, sn, y1r, y1i, sq, pq, SQRT2, &mut sm);
+                if L2 {
+                    let (u, v) = (pq[n + 2], pq[n]);
+                    let a1 = u * pq[n + 4];
+                    let ff = u * v; // also the factor of D-D- Y_n1 = -ff conj(Y_n+2,1)
+                    let pz = u * (sq[n] * sq[n + 4]);
+                    let qz = SQRT2 * (v * (sq[n + 2] * sq[n + 2]));
+                    let r3 = cm * y2r[3] + sn * y2i[3];
+                    let i3 = cm * y2i[3] - sn * y2r[3];
+                    let r1 = cm * y2r[1] + sn * y2i[1];
+                    let rc1 = cm * y2r[1] - sn * y2i[1]; //  Re K conj(Y_1)
+                    let ic1 = cm * y2i[1] + sn * y2r[1]; // -Im K conj(Y_1)
+                    let r2 = cm * y2r[2] + sn * y2i[2];
+                    let i2 = cm * y2i[2] - sn * y2r[2];
+                    let r0 = cm * y2r[0] + sn * y2i[0];
+                    let i0 = cm * y2i[0] - sn * y2r[0];
+                    sm[3] += a1 * r3 - ff * rc1;
+                    sm[4] += a1 * i3 - ff * ic1;
+                    sm[5] += ff * r1;
+                    sm[6] += pz * r2 - qz * r0;
+                    sm[7] += pz * i2 + qz * i0;
+                }
+            }
+            if n >= 2 {
+                // m = 2, then m = 3 .. n
+                cunn_acc(n, 2, c[2], s[2], y1r, y1i, sq, pq, 1.0, &mut sm);
+                if L2 {
+                    cunn_grad(n, 2, c[2], s[2], y2r, y2i, sq, pq, SQRT2, &mut sm);
+                }
+                for m in 3..=n {
+                    let (cm, sn) = (c[m], s[m]);
+                    cunn_acc(n, m, cm, sn, y1r, y1i, sq, pq, 1.0, &mut sm);
+                    if L2 {
+                        cunn_grad(n, m, cm, sn, y2r, y2i, sq, pq, 1.0, &mut sm);
+                    }
+                }
+            }
+            let h1 = 0.5 * self.g1[n];
+            f[0] += h1 * sm[0];
+            f[1] += h1 * sm[1];
+            f[2] += h1 * sm[2];
+            if L2 {
+                let g2 = self.g2[n];
+                f[3] += g2 * (0.25 * sm[3] - 0.5 * sm[5]);
+                f[4] += g2 * (0.25 * sm[4]);
+                f[5] += g2 * (0.5 * sm[6]);
+                f[6] += g2 * (-0.25 * sm[3] - 0.5 * sm[5]);
+                f[7] += g2 * (0.5 * sm[7]);
+                f[8] += g2 * sm[5];
+            }
+        }
+        let s1 = md.gm / (a * a);
+        let s2 = s1 / a;
+        [f[0] * s1, f[1] * s1, f[2] * s1, f[3] * s2, f[4] * s2, f[5] * s2, f[6] * s2, f[7] * s2, f[8] * s2]
+    }
+}
+
 // ------------------------------------------------------------------ driver
-pub const ALL: [&str; 9] = [
+pub const ALL: [&str; 10] = [
     "LEGENDRE_a", "LEGENDRE_a#2", "LEGENDRE_b", "PINES", "GOTTLIEB", "METRIS", "CLENSHAW", "LEAR", "HOLMES",
+    "CUNNINGHAM",
 ];
 
 enum Kern {
@@ -1274,6 +1492,7 @@ enum Kern {
     C(Clen),
     L(Lear),
     H(Hf),
+    U(Cunn),
 }
 
 fn make(name: &str, md: &Model, l2: bool) -> Kern {
@@ -1287,6 +1506,7 @@ fn make(name: &str, md: &Model, l2: bool) -> Kern {
         "CLENSHAW" => Kern::C(Clen),
         "LEAR" => Kern::L(Lear::new(md.n)),
         "HOLMES" => Kern::H(Hf::new(md.n)),
+        "CUNNINGHAM" => Kern::U(Cunn::new(md.n)),
         other => {
             eprintln!("unknown method {other}");
             std::process::exit(2);
@@ -1326,6 +1546,7 @@ impl Kern {
             Kern::C(k) => go!(k),
             Kern::L(k) => go!(k),
             Kern::H(k) => go!(k),
+            Kern::U(k) => go!(k),
         }
     }
     fn one(&mut self, md: &Model, p: &[f64; 3], l2: bool) -> [f64; 9] {
@@ -1344,6 +1565,7 @@ impl Kern {
             Kern::C(k) => go!(k),
             Kern::L(k) => go!(k),
             Kern::H(k) => go!(k),
+            Kern::U(k) => go!(k),
         }
     }
 }

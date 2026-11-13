@@ -1,11 +1,20 @@
 """
-benchmark.py -- accuracy and CPU time of eight spherical-harmonic gravity synthesis methods,
+benchmark.py -- accuracy and CPU time of nine spherical-harmonic gravity synthesis methods,
 all implemented as scalar Rust kernels in sph_rs/ (built on first use with cargo).
 
-    python benchmark.py                  # gate + timing + analysis -> results/
+    python benchmark.py                  # gate + timing + analysis -> results/ (scalar build)
+    python benchmark.py --simd           # the same with the auto-vectorized build -> results_simd/
+    python benchmark.py --phase simd     # both builds timed side by side -> results/simd.csv
     python benchmark.py --quick          # smoke test (N = 10, 50, 360; short blocks) -> results_quick/
     python benchmark.py --phase analyze  # recompute tables and figures from the saved raw data in results/
     python plots.py                      # redraw only the figures from the saved tables in results/
+
+Builds
+  scalar   LLVM auto-vectorization off (RUSTFLAGS = -C no-vectorize-loops -C no-vectorize-slp): every
+           method does one floating-point operation per instruction, so the times compare the algorithms.
+           The main results.
+  simd     LLVM auto-vectorization on (the default). The compiler packs some kernels into 2-wide NEON
+           instructions and not others, which changes the ranking.
 
 Phases
   gate     every method vs a double-double reference (sph_rs ref) at the same points:
@@ -14,8 +23,11 @@ Phases
            per round one fresh process per method, methods in random order; inside each:
            warm-up + B blocks of >= T ms, thread CPU time, a calibration loop before and
            after every block. A/A probe: a second compiled copy of LEGENDRE_a.
+  simd     the two builds side by side: per round and (N, level) one process per (method, build), in
+           random order, ORBIT1 points; raw thread CPU time (the calibration loop is itself compiled
+           differently by the two builds, so it cannot serve as a common unit) -> simd.csv.
   analyze  calibration-normalised medians, bootstrap CIs, winner rule ->
-           accuracy.csv, timing.csv, winners.csv, summary.md; figures by plots.py.
+           accuracy.csv, timing.csv, winners.csv, (simd.csv), summary.md; figures by plots.py.
 """
 
 import argparse
@@ -34,10 +46,20 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 CRATE = HERE / "sph_rs"
-TARGET = Path(os.environ.get("SPH_RS_TARGET", Path.home() / ".cache" / "sph_rs" / "target"))
-EXE = TARGET / "release" / "sph_rs"
+CACHE = Path(os.environ.get("SPH_RS_CACHE", Path.home() / ".cache" / "sph_rs"))
+BUILDS = {"scalar": "-C no-vectorize-loops -C no-vectorize-slp", "simd": ""}     # build -> RUSTFLAGS
+BUILD_NOTE = {"scalar": "LLVM auto-vectorization off (RUSTFLAGS = -C no-vectorize-loops -C no-vectorize-slp)",
+              "simd": "LLVM auto-vectorization on (the default)"}
 
-METHODS = ("LEGENDRE_a", "LEGENDRE_b", "PINES", "GOTTLIEB", "METRIS", "CLENSHAW", "LEAR", "HOLMES")
+
+def exe_of(build):
+    """Each build has its own cargo folder, so switching between them does not rebuild."""
+    return CACHE / ("target" if build == "scalar" else "target_" + build) / "release" / "sph_rs"
+
+
+EXE = exe_of("scalar")                                 # the binary sph() calls; main() selects the build
+
+METHODS = ("LEGENDRE_a", "LEGENDRE_b", "PINES", "GOTTLIEB", "METRIS", "CLENSHAW", "LEAR", "HOLMES", "CUNNINGHAM")
 AA = "LEGENDRE_a#2"             # A/A probe: second compiled copy of LEGENDRE_a
 N_LIST = (10, 20, 50, 100, 200, 360, 720, 1000, 1500, 2000)
 SETS = ("ORBIT1", "UNIFORM", "POLAR")
@@ -105,18 +127,19 @@ def point_set(name, K, seed):
 
 
 # ------------------------------------------------------------------ Rust binary
-def build():
+def build(name):
+    exe = exe_of(name)
     src = [CRATE / "Cargo.toml", *(CRATE / "src").glob("*.rs")]
-    if EXE.exists() and max(p.stat().st_mtime for p in src) <= EXE.stat().st_mtime:
+    if exe.exists() and max(p.stat().st_mtime for p in src) <= exe.stat().st_mtime:
         return
     cargo = shutil.which("cargo") or str(Path.home() / ".cargo" / "bin" / "cargo")
-    print("[build] cargo build --release", flush=True)
+    print(f"[build] cargo build --release ({name}: RUSTFLAGS='{BUILDS[name]}')", flush=True)
     subprocess.run([cargo, "build", "--release", "--manifest-path", str(CRATE / "Cargo.toml")],
-                   env=dict(os.environ, CARGO_TARGET_DIR=str(TARGET)), check=True)
+                   env=dict(os.environ, CARGO_TARGET_DIR=str(exe.parents[1]), RUSTFLAGS=BUILDS[name]), check=True)
 
 
-def sph(*args):
-    p = subprocess.run([str(EXE), *map(str, args)], capture_output=True, text=True)
+def sph(*args, exe=None):
+    p = subprocess.run([str(exe or EXE), *map(str, args)], capture_output=True, text=True)
     if p.returncode != 0:
         raise RuntimeError(f"sph_rs {args[0]} failed: {p.stderr.strip()}")
     return p
@@ -231,6 +254,33 @@ def run_timing(coef, n_list, gate, tmp, blocks, rounds, target_ms, seed, raw):
                       flush=True)
 
 
+def run_simd(coef, n_list, gate, tmp, blocks, rounds, target_ms, seed, raw):
+    """Both builds side by side: `rounds` passes over the (N, level) cells in random order; per pass and cell
+    one process per (method, build), in random order, on the ORBIT1 points (the cost of a point does not
+    depend on where it is). All JSON records -> raw (jsonl.gz), tagged with the build."""
+    finite = {(r["N"], r["method"]) for r in gate if r["finite"]}
+    rng = np.random.default_rng(seed + 1)
+    cells0 = [(N, lev) for N in n_list for lev in LEVELS]
+    t_all, run = time.time(), 0
+    with gzip.open(raw, "wt") as fh:
+        for rd in range(rounds):
+            for ci, i in enumerate(rng.permutation(len(cells0))):
+                N, lev = cells0[i]
+                pts = write_xyz(tmp / "time.bin", point_set("ORBIT1", k_time(N), seed=11))
+                jobs = [(m, b) for m in METHODS if (N, m) in finite for b in BUILDS]
+                t0 = time.time()
+                for j in rng.permutation(len(jobs)):
+                    (m, b), run = jobs[j], run + 1
+                    p = sph("bench", coef, pts, "--level", lev, "--nmax", N, "--methods", m, "--blocks", blocks,
+                            "--target-ms", target_ms, "--seed", seed + run, exe=exe_of(b))
+                    for line in p.stdout.splitlines():
+                        if line.startswith("{"):
+                            fh.write(json.dumps(dict(json.loads(line), N=N, level=lev, build=b, round=rd)) + "\n")
+                print(f"[simd] round {rd + 1}/{rounds}  {ci + 1:2d}/{len(cells0)}  N={N:5d} L{lev}  "
+                      f"{len(jobs)} processes  {time.time() - t0:5.1f} s  (total {(time.time() - t_all) / 60:5.1f} min)",
+                      flush=True)
+
+
 # ------------------------------------------------------------------ analysis
 def boot_ratio(a, b, rng, nboot=4000):
     """median(b) / median(a) and its 95% bootstrap interval (blocks resampled independently)."""
@@ -286,6 +336,27 @@ def analyze(recs, gate):
     return trows, wrows, cal_ref
 
 
+def analyze_simd(recs):
+    """Per (method, N, level): median raw CPU time per point of each build and the speed-up from
+    auto-vectorization = scalar / simd, with a 95% bootstrap interval. Also the calibration loop per build."""
+    K = {(r["N"], r["level"]): r["K"] for r in recs if r["t"] == "setup"}
+    blk, cal = {}, {}
+    for r in (r for r in recs if r["t"] == "m"):
+        blk.setdefault((r["method"], r["N"], r["level"], r["build"]), []).append(
+            r["cpu"] / r["reps"] / K[(r["N"], r["level"])])
+        cal.setdefault(r["build"], []).append(0.5 * (r["cal_ns"] + r["cal2_ns"]))
+    rng = np.random.default_rng(2009)
+    order = {m: i for i, m in enumerate(METHODS)}
+    rows = []
+    for m, N, lev in sorted({k[:3] for k in blk}, key=lambda k: (k[2], order[k[0]], k[1])):
+        a, b = (np.array(blk.get((m, N, lev, x), [])) for x in ("simd", "scalar"))
+        if a.size and b.size:
+            g = boot_ratio(a, b, rng)
+            rows.append(dict(method=m, N=N, level=lev, us_scalar=float(np.median(b)) * 1e6,
+                             us_simd=float(np.median(a)) * 1e6, speedup=g[0], ci_lo=g[1], ci_hi=g[2]))
+    return rows, {b: float(np.median(v)) for b, v in cal.items()}
+
+
 # ------------------------------------------------------------------ tables
 def write_csv(path, rows):
     with open(path, "w", newline="") as fh:
@@ -310,12 +381,14 @@ def read_csv(path):
     return rows
 
 
-def summary_md(gate, trows, wrows, meta):
+def summary_md(gate, trows, wrows, meta, srows=None):
     Ns = sorted({r["N"] for r in gate})
     head = "| Method | " + " | ".join(f"N={n}" for n in Ns) + " |\n|---|" + "---:|" * len(Ns)
+    note = BUILD_NOTE.get(meta.get("build", {}).get("name"), "")
     out = ["# Results", "",
            f"Generated by `benchmark.py` on {meta.get('machine', {}).get('cpu', '?')}, "
-           f"{meta.get('machine', {}).get('rustc', '')}. Synthetic Earth-like model (Kaula), degree N.", "",
+           f"{meta.get('machine', {}).get('rustc', '')}{', ' + note if note else ''}. "
+           "Synthetic Earth-like model (Kaula), degree N.", "",
            "## Accuracy", "",
            "Max. relative error = largest value, over all test points, of "
            "|computed - reference| / |reference - point-mass term| "
@@ -388,6 +461,21 @@ def summary_md(gate, trows, wrows, meta):
         out += [f"Point-set check (the cost of a point does not depend on where it is, so the {len(SETS)} point sets are "
                 f"repeat measurements): spread (max - min) / median of the time ratio to LEGENDRE_a over the sets = "
                 f"{np.median(list(spr.values())):.1%} (median), {spr[kmax]:.1%} (max, {kmax[2]} level {kmax[1]} N={kmax[0]}).", ""]
+    if srows:
+        sN = sorted({r["N"] for r in srows})
+        cal = meta.get("simd", {}).get("cal_ns", {})
+        out += ["## Auto-vectorization", "",
+                "Speed-up from LLVM auto-vectorization = CPU time of the scalar build / CPU time of the auto-vectorized "
+                "build (ORBIT1 points; both builds timed side by side in random order, raw thread CPU time; "
+                "above 1 = the auto-vectorized build is faster). The calibration loop itself runs at "
+                + ", ".join(f"{v:.2f} ns ({b})" for b, v in cal.items()) + " per iteration, so it cannot be a common unit.", ""]
+        for lev in LEVELS:
+            out += [f"**{'Acceleration' if lev == 1 else 'Acceleration + gravity gradient'}**", "",
+                    "| Method | " + " | ".join(f"N={n}" for n in sN) + " |\n|---|" + "---:|" * len(sN)]
+            for m in METHODS:
+                d = {r["N"]: r for r in srows if r["method"] == m and r["level"] == lev}
+                out.append(f"| {m} | " + " | ".join(f"{d[n]['speedup']:.2f}" if n in d else "-" for n in sN) + " |")
+            out.append("")
     return "\n".join(out)
 
 
@@ -408,8 +496,10 @@ def machine_info():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--phase", default="all", choices=("all", "gate", "time", "analyze"))
-    ap.add_argument("--out", default=None, help="output folder (default results/)")
+    ap.add_argument("--phase", default="all", choices=("all", "gate", "time", "simd", "analyze"))
+    ap.add_argument("--simd", action="store_true",
+                    help="gate and time the auto-vectorized build (default: auto-vectorization off) -> results_simd/")
+    ap.add_argument("--out", default=None, help="output folder (default results/, results_simd/ with --simd)")
     ap.add_argument("--N", type=int, nargs="+", default=list(N_LIST))
     ap.add_argument("--blocks", type=int, default=4, help="timed blocks per process")
     ap.add_argument("--rounds", type=int, default=3, help="passes over all cells (one process per method each)")
@@ -421,12 +511,18 @@ def main():
     a = ap.parse_args()
     if a.quick:
         a.N, a.blocks, a.rounds, a.target_ms, a.k_gate = [10, 50, 360], 3, 2, 20.0, 8
-    out = Path(a.out or HERE / ("results_quick" if a.quick else "results"))
+    global EXE
+    name = "simd" if a.simd and a.phase != "simd" else "scalar"
+    EXE = exe_of(name)
+    out = Path(a.out or HERE / (("results_quick" if a.quick else "results") + ("_simd" if name == "simd" else "")))
     out.mkdir(parents=True, exist_ok=True)
-    meta_path, raw = out / "meta.json", out / "raw_timing.jsonl.gz"
+    meta_path, raw, raw_simd = out / "meta.json", out / "raw_timing.jsonl.gz", out / "raw_simd.jsonl.gz"
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
     if a.phase != "analyze":                    # analyze needs only the files saved in out/
-        build()
+        for b in (BUILDS if a.phase == "simd" else (name,)):
+            build(b)
+        if a.phase in ("all", "gate", "time"):
+            meta["build"] = dict(name=name, rustflags=BUILDS[name])
         with tempfile.TemporaryDirectory(prefix="sph_") as td:
             tmp = Path(td)
             coef = write_coef(tmp / "coef.bin", *synthetic_model(max(a.N)))
@@ -445,7 +541,19 @@ def main():
                                       K={N: k_time(N) for N in a.N}, minutes=(time.time() - t0) / 60,
                                       loadavg_start=m0["loadavg"], loadavg_end=machine_info()["loadavg"])
                 meta_path.write_text(json.dumps(meta, indent=1))
+            if a.phase == "simd":
+                t0 = time.time()
+                run_simd(coef, a.N, gate, tmp, a.blocks, a.rounds, a.target_ms, a.seed, raw_simd)
+                meta["simd"] = dict(N=a.N, blocks=a.blocks, rounds=a.rounds, target_ms=a.target_ms, seed=a.seed,
+                                    rustflags=BUILDS, minutes=(time.time() - t0) / 60, machine=machine_info())
+                meta_path.write_text(json.dumps(meta, indent=1))
     gate = read_csv(out / "accuracy.csv")
+    srows = None
+    if raw_simd.exists():
+        with gzip.open(raw_simd, "rt") as fh:
+            srows, cal = analyze_simd([json.loads(line) for line in fh])
+        write_csv(out / "simd.csv", srows)
+        meta.setdefault("simd", {})["cal_ns"] = cal
     with gzip.open(raw, "rt") as fh:
         recs = [json.loads(line) for line in fh]
     trows, wrows, cal_ref = analyze(recs, gate)
@@ -453,7 +561,7 @@ def main():
     write_csv(out / "winners.csv", wrows)
     meta["analysis"] = dict(cal_ref_ns=cal_ref, delta_min=DELTA_MIN, gate_abs=GATE_ABS, gate_rel=GATE_REL)
     meta_path.write_text(json.dumps(meta, indent=1))
-    (out / "summary.md").write_text(summary_md(gate, trows, wrows, meta))
+    (out / "summary.md").write_text(summary_md(gate, trows, wrows, meta, srows))
     from plots import figures
     figures(out)
     print((out / "summary.md").read_text())
