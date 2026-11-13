@@ -17,6 +17,7 @@ Max. relative error = largest value, over all test points, of |computed - refere
 | METRIS | 3.6e-13 | 4.7e-13 | 6.7e-13 | 9.2e-13 | 1.6e-12 | 1.7e-12 | 3.1e-12 | 3.1e-12 | 3.1e-12 | 3.1e-12 |
 | CLENSHAW | 5.0e-13 | 6.8e-13 | 1.1e-12 | 1.4e-12 | 1.7e-12 | 2.2e-12 | 2.7e-12 | 2.7e-12 | 2.7e-12 | overflow |
 | LEAR | 5.0e-13 | 7.4e-13 | 7.5e-13 | 9.9e-13 | 1.3e-12 | 1.7e-12 | 2.7e-12 | 2.7e-12 | 2.7e-12 | 2.7e-12 |
+| HOLMES | 4.6e-13 | 6.7e-13 | 8.1e-13 | 1.0e-12 | 1.2e-12 | 1.7e-12 | 2.6e-12 | 2.6e-12 | 2.6e-12 | 2.6e-12 |
 
 **Gravity gradient**
 
@@ -29,48 +30,51 @@ Max. relative error = largest value, over all test points, of |computed - refere
 | METRIS | 3.0e-13 | 3.4e-13 | 3.4e-13 | 3.1e-13 | 5.6e-13 | 6.0e-13 | 8.2e-13 | 9.6e-13 | 9.6e-13 | 9.6e-13 |
 | CLENSHAW | 2.5e-13 | 3.1e-13 | 4.7e-13 | 4.5e-13 | 5.7e-13 | 9.1e-13 | 9.1e-13 | 1.1e-12 | 1.1e-12 | overflow |
 | LEAR | 2.3e-13 | 3.2e-13 | 4.0e-13 | 4.1e-13 | 4.3e-13 | 6.5e-13 | 1.2e-12 | 1.2e-12 | 1.2e-12 | 1.2e-12 |
+| HOLMES | 2.3e-13 | 2.5e-13 | 3.6e-13 | 4.7e-13 | 6.1e-13 | 7.0e-13 | 8.0e-13 | 8.3e-13 | 8.3e-13 | 8.3e-13 |
 
 Reference check (two independent double-double formulations): max difference 4e-28.
 
 ## CPU time
 
-CPU time per point in microseconds (ORBIT1 points; median of the blocks, normalised by the calibration loop). **bold** = fastest; tied methods (difference not resolvable, see winners.csv) marked with *. x = failed the accuracy check, - = not run (overflow).
+CPU time per point in microseconds (ORBIT1 points; median of the blocks, normalised by the calibration loop). **bold** = fastest; tied methods (difference not resolvable, see winners.csv) marked with *. x = failed the accuracy check, - = overflow (not timed).
 
 **Acceleration**
 
 | Method | N=10 | N=20 | N=50 | N=100 | N=200 | N=360 | N=720 | N=1000 | N=1500 | N=2000 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| LEGENDRE_a | 0.154* | **0.417** | 1.90* | 7.02 | 26.5 | 84.4 | 331 | 685 | 1557 | 2780 |
-| LEGENDRE_b | 0.185 | 0.473 | 2.03 | 7.42 | 28.4 | 89.9 | 357 | 678 | 1728 | 3185 |
-| PINES | 0.181 | 0.498 | 2.13 | 8.00 | 30.4 | 96.4 | 387 | 850 | - | - |
-| GOTTLIEB | 0.186 | 0.468 | 2.20 | 8.06 | 29.9 | 95.1 | 370 | 738 | - | - |
-| METRIS | 0.189 | 0.480 | 2.10 | 7.53 | 27.6 | 88.6 | 352 | 724 | 1803 | 3406 |
-| CLENSHAW | 0.159* | 0.597 | 3.24 | 14.6 | 59.3 | 197 | 802 | 1563 | 3590 | - |
-| LEAR | **0.151** | 0.438* | **1.84** | **6.48** | **23.5** | **74.0** | **292** | **576** | **1336** | **2488** |
+| LEGENDRE_a | **0.148** | **0.413** | 1.88* | 6.85* | 26.2 | 83.9 | 334 | 651 | 1561 | 2786 |
+| LEGENDRE_b | 0.174 | 0.459 | 2.02* | 7.28* | 28.3 | 87.5 | 354 | 685 | 1723 | 3160 |
+| PINES | 0.184 | 0.509 | 2.08 | 8.05 | 30.1 | 95.6 | 383 | 749 | - | - |
+| GOTTLIEB | 0.175 | 0.491 | 2.13 | 8.10 | 29.3 | 93.9 | 371 | 722 | - | - |
+| METRIS | 0.180 | 0.490 | 2.07 | 7.40* | 27.5 | 86.8 | 357 | 696 | 1745 | 3457 |
+| CLENSHAW | 0.163* | 0.525 | 3.35 | 13.9 | 59.4 | 197 | 816 | 1557 | 3536 | - |
+| LEAR | 0.151* | 0.434* | **1.84** | **6.56** | **23.4** | **72.5** | **289** | **559** | **1374** | **2455** |
+| HOLMES | 0.180 | 0.473 | 2.07 | 7.77 | 28.9 | 90.4 | 363 | 686 | 1617 | 2890 |
 
 **Acceleration + gravity gradient**
 
 | Method | N=10 | N=20 | N=50 | N=100 | N=200 | N=360 | N=720 | N=1000 | N=1500 | N=2000 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| LEGENDRE_a | 0.270* | 0.765 | 3.70 | 13.7 | 53.4 | 170 | 697 | 1324 | 3059 | 5456 |
-| LEGENDRE_b | 0.295 | 0.811 | 3.92 | 14.3 | 55.0 | 175 | 704 | 1377 | 3272 | 5716 |
-| PINES | 0.319 | 0.905 | 4.46 | 16.9 | 64.6 | 210 | 893 | 1729 | - | - |
-| GOTTLIEB | 0.298 | 0.917 | 4.35 | 16.3 | 63.2 | 203 | 804 | 1573 | - | - |
-| METRIS | **0.262** | **0.642** | **3.21** | **11.1** | **41.7** | **133** | **551** | **1115** | **2638** | **5129** |
-| CLENSHAW | 0.280 | 0.817 | 4.14 | 15.5 | 59.5 | 189 | 765 | 1481 | 3389 | - |
-| LEAR | 0.282 | 0.896 | 4.86 | 18.9 | 73.8 | 234 | 953 | 1824 | 4163 | 8000 |
+| LEGENDRE_a | 0.261* | 0.781 | 3.77 | 13.5 | 52.3 | 175 | 730 | 1346 | 3026 | 5471 |
+| LEGENDRE_b | 0.292 | 0.817 | 3.81 | 14.3 | 54.6 | 184 | 687 | 1357 | 3315 | 5631 |
+| PINES | 0.338 | 0.905 | 4.42 | 16.9 | 63.7 | 207 | 849 | 1665 | - | - |
+| GOTTLIEB | 0.294 | 0.891 | 4.34 | 16.2 | 62.3 | 200 | 809 | 1531 | - | - |
+| METRIS | **0.249** | **0.634** | **3.25** | **11.0** | **41.0** | **131** | **537** | **1068** | **2568** | **4947** |
+| CLENSHAW | 0.275* | 0.807 | 4.12 | 15.5 | 58.7 | 192 | 747 | 1442 | 3303 | - |
+| LEAR | 0.274* | 0.898 | 4.95 | 19.4 | 73.6 | 232 | 922 | 1803 | 4131 | 7956 |
+| HOLMES | 0.278* | 0.763 | 3.55 | 13.2 | 48.7 | 154 | 627* | 1226* | 2738* | 4958* |
 
 ## Fastest method per N (all point sets)
 
 | Output | Points | N=10 | N=20 | N=50 | N=100 | N=200 | N=360 | N=720 | N=1000 | N=1500 | N=2000 |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| Acc. | ORBIT1 | tie: LEAR+LEGENDRE_a+CLENSHAW | tie: LEGENDRE_a+LEAR | tie: LEAR+LEGENDRE_a | LEAR | LEAR | LEAR | LEAR | LEAR | LEAR | LEAR |
-| Acc. | UNIFORM | tie: LEGENDRE_a+LEAR+CLENSHAW | tie: LEGENDRE_a+LEAR+GOTTLIEB+LEGENDRE_b | tie: LEAR+LEGENDRE_a+LEGENDRE_b | tie: LEAR+LEGENDRE_a | tie: LEAR+LEGENDRE_a | LEAR | LEAR | LEAR | LEAR | LEAR |
-| Acc. | POLAR | tie: LEGENDRE_a+LEAR+CLENSHAW | tie: LEGENDRE_a+LEAR | tie: LEAR+LEGENDRE_a | tie: LEAR+LEGENDRE_a | LEAR | LEAR | LEAR | LEAR | tie: LEAR+LEGENDRE_a | LEAR |
-| Acc. + grad. | ORBIT1 | tie: METRIS+LEGENDRE_a | METRIS | METRIS | METRIS | METRIS | METRIS | METRIS | METRIS | METRIS | METRIS |
-| Acc. + grad. | UNIFORM | tie: METRIS+LEGENDRE_a | tie: METRIS+LEGENDRE_a | METRIS | METRIS | METRIS | METRIS | METRIS | METRIS | METRIS | tie: METRIS+LEGENDRE_a+LEGENDRE_b |
-| Acc. + grad. | POLAR | METRIS | METRIS | METRIS | METRIS | METRIS | METRIS | METRIS | tie: METRIS+LEGENDRE_a | tie: METRIS+LEGENDRE_a | METRIS |
+| Acc. | ORBIT1 | tie: LEGENDRE_a+LEAR+CLENSHAW | tie: LEGENDRE_a+LEAR | tie: LEAR+LEGENDRE_a+LEGENDRE_b | tie: LEAR+LEGENDRE_a+LEGENDRE_b+METRIS | LEAR | LEAR | LEAR | LEAR | LEAR | LEAR |
+| Acc. | UNIFORM | tie: LEGENDRE_a+LEAR+CLENSHAW | tie: LEGENDRE_a+LEAR | tie: LEAR+LEGENDRE_a | LEAR | LEAR | LEAR | LEAR | LEAR | tie: LEAR+LEGENDRE_a | LEAR |
+| Acc. | POLAR | tie: LEAR+LEGENDRE_a+CLENSHAW | tie: LEGENDRE_a+LEAR | tie: LEAR+LEGENDRE_a+LEGENDRE_b | LEAR | LEAR | LEAR | LEAR | LEAR | LEAR | LEAR |
+| Acc. + grad. | ORBIT1 | tie: METRIS+LEGENDRE_a+LEAR+CLENSHAW+HOLMES | METRIS | METRIS | METRIS | METRIS | METRIS | tie: METRIS+HOLMES | tie: METRIS+HOLMES | tie: METRIS+HOLMES | tie: METRIS+HOLMES |
+| Acc. + grad. | UNIFORM | tie: METRIS+LEGENDRE_a+CLENSHAW+HOLMES | METRIS | tie: METRIS+HOLMES | METRIS | METRIS | METRIS | METRIS | METRIS | tie: METRIS+HOLMES | tie: HOLMES+METRIS |
+| Acc. + grad. | POLAR | tie: METRIS+LEGENDRE_a+HOLMES+CLENSHAW+LEAR | METRIS | tie: METRIS+HOLMES | METRIS | METRIS | METRIS | METRIS | tie: METRIS+HOLMES | tie: METRIS+HOLMES | tie: HOLMES+METRIS |
 
-A/A probe (LEGENDRE_a timed against an identical second copy of itself): median |ratio - 1| = 0.7%, max 5.3%; a win needs the 95% interval of the time ratio above 1 + max(5%, 2 |A/A - 1|).
+A/A probe (LEGENDRE_a timed against an identical second copy of itself): median |ratio - 1| = 1.2%, max 8.3%; a win needs the 95% interval of the time ratio above 1 + max(5%, 2 |A/A - 1|).
 
-Point-set check (the cost of a point does not depend on where it is, so the 3 point sets are repeat measurements): spread (max - min) / median of the time ratio to LEGENDRE_a over the sets = 2.5% (median), 16.6% (max, LEAR level 2 N=2000).
+Point-set check (the cost of a point does not depend on where it is, so the 3 point sets are repeat measurements): spread (max - min) / median of the time ratio to LEGENDRE_a over the sets = 3.7% (median), 14.4% (max, LEAR level 2 N=2000).

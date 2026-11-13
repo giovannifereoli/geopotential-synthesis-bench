@@ -1,5 +1,5 @@
 """
-benchmark.py -- accuracy and CPU time of seven spherical-harmonic gravity synthesis methods,
+benchmark.py -- accuracy and CPU time of eight spherical-harmonic gravity synthesis methods,
 all implemented as scalar Rust kernels in sph_rs/ (built on first use with cargo).
 
     python benchmark.py                  # gate + timing + analysis -> results/
@@ -37,14 +37,13 @@ CRATE = HERE / "sph_rs"
 TARGET = Path(os.environ.get("SPH_RS_TARGET", Path.home() / ".cache" / "sph_rs" / "target"))
 EXE = TARGET / "release" / "sph_rs"
 
-METHODS = ("LEGENDRE_a", "LEGENDRE_b", "PINES", "GOTTLIEB", "METRIS", "CLENSHAW", "LEAR")
+METHODS = ("LEGENDRE_a", "LEGENDRE_b", "PINES", "GOTTLIEB", "METRIS", "CLENSHAW", "LEAR", "HOLMES")
 AA = "LEGENDRE_a#2"             # A/A probe: second compiled copy of LEGENDRE_a
 N_LIST = (10, 20, 50, 100, 200, 360, 720, 1000, 1500, 2000)
 SETS = ("ORBIT1", "UNIFORM", "POLAR")
 LEVELS = (1, 2)
 GATE_ABS = 1e-11                # pass: max. relative error <= GATE_ABS ...
 GATE_REL = 10.0                 # ... and <= GATE_REL x the best method's max. relative error
-CAL_TOL = 0.03                  # a block is dropped if the calibration before/after differ by more
 DELTA_MIN = 0.05                # smallest speed difference that can be called a win
 GM, A_REF, J2 = 3.986004415e14, 6378136.3, 1.0826266835531513e-3
 W6 = np.array([1, 2, 2, 1, 2, 1.0])[:, None]   # Frobenius weights of xx xy xz yy yz zz
@@ -252,15 +251,12 @@ def analyze(recs, gate):
     blk = {}
     for r in meas:
         key = (r["N"], r["level"], r["set"], r["method"])
-        blk.setdefault(key, []).append((r["cpu"] / r["reps"] / K[key[:3]], 0.5 * (r["cal_ns"] + r["cal2_ns"]),
-                                        abs(r["cal_ns"] / r["cal2_ns"] - 1)))
+        blk.setdefault(key, []).append((r["cpu"] / r["reps"] / K[key[:3]], 0.5 * (r["cal_ns"] + r["cal2_ns"])))
     t = {}
     for key, v in blk.items():
         v = np.array(v)
-        ok = v[:, 2] <= CAL_TOL
-        if ok.sum() < 5:                                   # too few clean blocks: keep them all
-            ok[:] = True
-        t[key] = v[ok, 0] * cal_ref / v[ok, 1]
+        t[key] = v[:, 0] * cal_ref / v[:, 1]              # all blocks: dropping blocks whose calibration
+                                                           # drifted made the tails worse, not better
     passed = {(r["N"], r["set"], r["method"], lev) for r in gate for lev in LEVELS if r[f"pass_L{lev}"]}
     order = {m: i for i, m in enumerate(METHODS + (AA,))}
     rng = np.random.default_rng(2009)
@@ -344,7 +340,7 @@ def summary_md(gate, trows, wrows, meta):
     out += ["## CPU time", "",
             "CPU time per point in microseconds (ORBIT1 points; median of the blocks, normalised by the calibration loop). "
             "**bold** = fastest; tied methods (difference not resolvable, see winners.csv) marked with *. "
-            "x = failed the accuracy check, - = not run (overflow).", ""]
+            "x = failed the accuracy check, - = overflow (not timed).", ""]
     for lev in LEVELS:
         out += [f"**{'Acceleration' if lev == 1 else 'Acceleration + gravity gradient'}**", "", head]
         for m in METHODS:
@@ -352,8 +348,9 @@ def summary_md(gate, trows, wrows, meta):
             for N in Ns:
                 r = next((r for r in trows if (r["N"], r["level"], r["set"], r["method"]) == (N, lev, "ORBIT1", m)), None)
                 w = win.get((N, lev, "ORBIT1"))
-                if r is None:
-                    cells.append("-")
+                if r is None:                             # overflow, or the timing phase has not run yet
+                    ovf = not all(g["finite"] for g in gate if g["N"] == N and g["method"] == m)
+                    cells.append("-" if ovf else "not timed")
                     continue
                 u = r["us_per_pt"]
                 v = f"{u:.0f}" if u >= 100 else f"{u:#.3g}"
@@ -454,7 +451,7 @@ def main():
     trows, wrows, cal_ref = analyze(recs, gate)
     write_csv(out / "timing.csv", trows)
     write_csv(out / "winners.csv", wrows)
-    meta["analysis"] = dict(cal_ref_ns=cal_ref, cal_tol=CAL_TOL, delta_min=DELTA_MIN, gate_abs=GATE_ABS, gate_rel=GATE_REL)
+    meta["analysis"] = dict(cal_ref_ns=cal_ref, delta_min=DELTA_MIN, gate_abs=GATE_ABS, gate_rel=GATE_REL)
     meta_path.write_text(json.dumps(meta, indent=1))
     (out / "summary.md").write_text(summary_md(gate, trows, wrows, meta))
     from plots import figures

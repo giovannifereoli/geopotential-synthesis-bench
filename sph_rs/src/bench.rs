@@ -21,7 +21,9 @@
 //! The spherical methods are pole-safe (no division by cos(phi)): LEGENDRE_a/b and CLENSHAW
 //! recur on Z_nm = Pbar_nm / cos(phi)^min(m,2), so that the 1/cos and 1/cos^2 of the local-frame
 //! gradient and tensor cancel analytically (same recursion, ~2 extra multiplies per term);
-//! LEAR uses Pbar_nm / cos(phi) at level 1 and adds Pbar_nm / cos(phi)^2 at level 2 (see LEAR).
+//! LEAR uses Pbar_nm / cos(phi) at level 1 and adds Pbar_nm / cos(phi)^2 at level 2 (see LEAR);
+//! HOLMES recurs on Pbar_nm / cos(phi)^m and keeps the negative powers of cos(phi) of the
+//! derivatives in separate Horner chains (see HOLMES).
 
 use crate::{clock_gettime, load_model, metris_op, rd_f64, rd_u64, Model, Tables, Timespec};
 use std::fs;
@@ -1047,9 +1049,219 @@ impl Kernel for Lear {
     }
 }
 
+// ------------------------------------------------------------------ HOLMES (Holmes & Featherstone)
+// Holmes & Featherstone (2002), J. Geodesy 76:279-299, "modified forward row method", organised
+// as in Orekit's HolmesFeatherstoneAttractionModel. Variables: s = sin(phi), c = cos(phi);
+//   Pt_nm = Pbar_nm / c^m, scaled by 2^-930 (Orekit's SCALING; the paper uses 1e-280), so that
+//   Pt_nm stays finite at high degree near the poles; rows of the triangle, m = N .. 0:
+//     Pt_mm = sect_m,   Pt_nm = g_nm s Pt_n,m+1 - h_nm c^2 Pt_n,m+2   (n = m+1 .. N)
+//   (one pass per m that builds the column, one that forms the sums over n); the orders are then
+//   combined by Horner's rule in c, sum_m c^m T_m, which puts the c^m back. Constants g, h, k, j
+//   are stored in loop order, as in Orekit.
+// Derivatives with the identities of LEGENDRE (dPbar/dphi = k Pbar_n,m+1 - m tan(phi) Pbar_nm,
+// and d2P, en, ee as there). Every term is c^(m+i) x (a sum over n), i = -2 .. 2; the terms with
+// i < 0 carry the factor m or m(m-1) and go into their own Horner chains in c^(m-1) (m >= 1) and
+// c^(m-2) (m >= 2): no division by c (pole-safe). Orekit divides by c instead (tan phi, and
+// 1/c, 1/c^2 in its spherical-to-Cartesian conversion), which is not pole-safe.
+// Orekit skips n < 2; here n = 0, 1 are included, as in every other method.
+const HF_SCALE_DOWN: f64 = f64::from_bits(((1023 - 930) as u64) << 52); // 2^-930
+const HF_SCALE_UP: f64 = f64::from_bits(((1023 + 930) as u64) << 52); // 2^930
+
+pub struct Hf {
+    gr: Vec<f64>, // packed, loop order (m = N .. 0, n = m+1 .. N)
+    hr: Vec<f64>,
+    kr: Vec<f64>,
+    jr: Vec<f64>,
+    sect: Vec<f64>, // 2^-930 Pbar_mm / c^m
+    w: Vec<f64>,    // (a/r)^n
+    cm: Vec<f64>,
+    sm: Vec<f64>,
+    p0: Vec<f64>, // column m
+    p1: Vec<f64>, // column m+1
+    p2: Vec<f64>, // column m+2
+}
+impl Hf {
+    fn new(n: usize) -> Self {
+        let len = n * (n + 1) / 2;
+        let (mut gr, mut hr, mut kr, mut jr) =
+            (Vec::with_capacity(len), Vec::with_capacity(len), Vec::with_capacity(len), Vec::with_capacity(len));
+        for m in (0..=n).rev() {
+            let fm = m as f64;
+            let jm = if m == 0 { 2.0 } else { 1.0 };
+            for ni in m + 1..=n {
+                let fnn = ni as f64;
+                let f = (fnn - fm) * (fnn + fm + 1.0);
+                let f1 = (fnn - fm - 1.0) * (fnn + fm + 2.0);
+                gr.push(2.0 * (fm + 1.0) / (jm * f).sqrt());
+                hr.push((f1 / (jm * f)).sqrt());
+                kr.push((f / jm).sqrt());
+                jr.push((f * f1 / jm).sqrt());
+            }
+        }
+        let mut sect = vec![0.0f64; n + 1];
+        sect[0] = HF_SCALE_DOWN;
+        if n >= 1 {
+            sect[1] = 3.0f64.sqrt() * sect[0];
+        }
+        for m in 2..=n {
+            let fm = m as f64;
+            sect[m] = ((2.0 * fm + 1.0) / (2.0 * fm)).sqrt() * sect[m - 1];
+        }
+        let z = || vec![0.0f64; n + 1];
+        Hf { gr, hr, kr, jr, sect, w: z(), cm: z(), sm: z(), p0: z(), p1: z(), p2: z() }
+    }
+}
+impl Kernel for Hf {
+    #[inline(never)]
+    fn eval<const L2: bool>(&mut self, md: &Model, x: f64, y: f64, z: f64) -> [f64; 9] {
+        let (nmax, n1) = (md.n, md.n1);
+        let (r, s, c, cl, sl) = sph_geom(x, y, z);
+        let c2 = c * c;
+        let q = md.a / r;
+        {
+            let w = &mut self.w[..nmax + 1];
+            w[0] = 1.0;
+            for n in 1..=nmax {
+                w[n] = w[n - 1] * q;
+            }
+        }
+        trig(&mut self.cm, &mut self.sm, cl, sl);
+        self.p0.fill(0.0);
+        self.p1.fill(0.0);
+        self.p2.fill(0.0);
+        // Horner chains: h0 in c^m, h1 in c^(m-1) (m >= 1), h2 in c^(m-2) (m >= 2)
+        let mut h0 = [0.0f64; 7];
+        let mut h1 = [0.0f64; 4];
+        let mut h2 = [0.0f64; 2];
+        let mut idx = 0usize;
+        for m in (0..=nmax).rev() {
+            let len = nmax - m; // n = m+1 .. N
+            let gr = &self.gr[idx..idx + len];
+            let hr = &self.hr[idx..idx + len];
+            let kr = &self.kr[idx..idx + len];
+            let jr = &self.jr[idx..idx + len];
+            idx += len;
+            // column m
+            {
+                let p0 = &mut self.p0[m..nmax + 1];
+                let p1 = &self.p1[m + 1..nmax + 1];
+                let p2 = &self.p2[m + 1..nmax + 1];
+                p0[0] = self.sect[m];
+                let p0t = &mut p0[1..];
+                for i in 0..len {
+                    p0t[i] = gr[i] * s * p1[i] - hr[i] * c2 * p2[i];
+                }
+            }
+            // sums over n for this order
+            let p0 = &self.p0[m..nmax + 1];
+            let p1 = &self.p1[m..nmax + 1];
+            let p2 = &self.p2[m..nmax + 1];
+            let w = &self.w[m..nmax + 1];
+            let cc = &md.ct[m * n1 + m..m * n1 + n1];
+            let cs = &md.st[m * n1 + m..m * n1 + n1];
+            let fm = m as f64;
+            // [C, S] parts of: A = sum w Pt, B = sum w (n+1) Pt, K = sum w k Pt_n,m+1,
+            // level 2: D = sum w (n+1)(n+2) Pt, E = sum w (n+2) k Pt_n,m+1, J = sum w j Pt_n,m+2
+            let mut sa = [0.0f64; 2];
+            let mut sb = [0.0f64; 2];
+            let mut sk = [0.0f64; 2];
+            let mut sd = [0.0f64; 2];
+            let mut se = [0.0f64; 2];
+            let mut sj = [0.0f64; 2];
+            {
+                // n = m (sectoral): k = j = 0
+                let (wc, ws) = (w[0] * cc[0], w[0] * cs[0]);
+                let (pc, ps) = (p0[0] * wc, p0[0] * ws);
+                let a1 = fm + 1.0;
+                sa[0] += pc;
+                sa[1] += ps;
+                sb[0] += a1 * pc;
+                sb[1] += a1 * ps;
+                if L2 {
+                    let a12 = a1 * (a1 + 1.0);
+                    sd[0] += a12 * pc;
+                    sd[1] += a12 * ps;
+                }
+            }
+            let (p0t, p1t, p2t) = (&p0[1..1 + len], &p1[1..1 + len], &p2[1..1 + len]);
+            let (wt, cct, cst) = (&w[1..1 + len], &cc[1..1 + len], &cs[1..1 + len]);
+            for i in 0..len {
+                let (wc, ws) = (wt[i] * cct[i], wt[i] * cst[i]);
+                let p = p0t[i];
+                let (pc, ps) = (p * wc, p * ws);
+                let a1 = (m + i) as f64 + 2.0; // n + 1, n = m + 1 + i
+                sa[0] += pc;
+                sa[1] += ps;
+                sb[0] += a1 * pc;
+                sb[1] += a1 * ps;
+                let kp = kr[i] * p1t[i];
+                let (kc, ks) = (kp * wc, kp * ws);
+                sk[0] += kc;
+                sk[1] += ks;
+                if L2 {
+                    let a2 = a1 + 1.0;
+                    let a12 = a1 * a2;
+                    sd[0] += a12 * pc;
+                    sd[1] += a12 * ps;
+                    se[0] += a2 * kc;
+                    se[1] += a2 * ks;
+                    let jp = jr[i] * p2t[i];
+                    sj[0] += jp * wc;
+                    sj[1] += jp * ws;
+                }
+            }
+            let (cmv, smv) = (self.cm[m], self.sm[m]);
+            let xx = |v: &[f64; 2]| cmv * v[0] + smv * v[1];
+            let yy = |v: &[f64; 2]| cmv * v[1] - smv * v[0];
+            let (xa, ya, xb, xk) = (xx(&sa), yy(&sa), xx(&sb), xx(&sk));
+            h0[0] = h0[0] * c + xb;
+            h0[1] = h0[1] * c + xk;
+            if m >= 1 {
+                h1[0] = h1[0] * c + fm * xa;
+                h1[1] = h1[1] * c + fm * ya;
+            }
+            if L2 {
+                let (yb, yk, xd, xe, xj) = (yy(&sb), yy(&sk), xx(&sd), xx(&se), xx(&sj));
+                h0[2] = h0[2] * c + xd;
+                h0[3] = h0[3] * c + xe;
+                h0[4] = h0[4] * c + (c2 * xj - fm * fm * xa - (2.0 * fm + 1.0) * s * xk);
+                h0[5] = h0[5] * c - fm * xa;
+                h0[6] = h0[6] * c + fm * yk;
+                if m >= 1 {
+                    h1[2] = h1[2] * c + fm * (xa + xb);
+                    h1[3] = h1[3] * c + fm * (ya + yb);
+                }
+                if m >= 2 {
+                    let mm1 = fm * (fm - 1.0);
+                    h2[0] = h2[0] * c + mm1 * xa;
+                    h2[1] = h2[1] * c + mm1 * ya;
+                }
+            }
+            // columns move down by one: p2 <- p1 <- p0 <- (old p2, overwritten next)
+            std::mem::swap(&mut self.p2, &mut self.p1);
+            std::mem::swap(&mut self.p1, &mut self.p0);
+        }
+        // the same local-frame sums as LEGENDRE (leg_accumulate), scaled back by 2^930
+        let sc = HF_SCALE_UP;
+        let mut acc = [0.0f64; 9];
+        acc[0] = sc * h0[0];
+        acc[1] = sc * (c * h0[1] - s * h1[0]);
+        acc[2] = sc * h1[1];
+        if L2 {
+            acc[3] = sc * h0[2];
+            acc[4] = sc * (h0[4] + h2[0]);
+            acc[5] = sc * (h0[5] - s * h0[1] - h2[0]);
+            acc[6] = sc * (h0[6] - s * h2[1]);
+            acc[7] = sc * h1[3];
+            acc[8] = sc * (c * h0[3] - s * h1[2]);
+        }
+        leg_finish::<L2>(&acc, md.gm, r, s, c, cl, sl)
+    }
+}
+
 // ------------------------------------------------------------------ driver
-pub const ALL: [&str; 8] = [
-    "LEGENDRE_a", "LEGENDRE_a#2", "LEGENDRE_b", "PINES", "GOTTLIEB", "METRIS", "CLENSHAW", "LEAR",
+pub const ALL: [&str; 9] = [
+    "LEGENDRE_a", "LEGENDRE_a#2", "LEGENDRE_b", "PINES", "GOTTLIEB", "METRIS", "CLENSHAW", "LEAR", "HOLMES",
 ];
 
 enum Kern {
@@ -1061,6 +1273,7 @@ enum Kern {
     M(Metris),
     C(Clen),
     L(Lear),
+    H(Hf),
 }
 
 fn make(name: &str, md: &Model, l2: bool) -> Kern {
@@ -1073,6 +1286,7 @@ fn make(name: &str, md: &Model, l2: bool) -> Kern {
         "METRIS" => Kern::M(Metris::new(md, l2)),
         "CLENSHAW" => Kern::C(Clen),
         "LEAR" => Kern::L(Lear::new(md.n)),
+        "HOLMES" => Kern::H(Hf::new(md.n)),
         other => {
             eprintln!("unknown method {other}");
             std::process::exit(2);
@@ -1111,6 +1325,7 @@ impl Kern {
             Kern::M(k) => go!(k),
             Kern::C(k) => go!(k),
             Kern::L(k) => go!(k),
+            Kern::H(k) => go!(k),
         }
     }
     fn one(&mut self, md: &Model, p: &[f64; 3], l2: bool) -> [f64; 9] {
@@ -1128,6 +1343,7 @@ impl Kern {
             Kern::M(k) => go!(k),
             Kern::C(k) => go!(k),
             Kern::L(k) => go!(k),
+            Kern::H(k) => go!(k),
         }
     }
 }

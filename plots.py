@@ -38,7 +38,8 @@ OVF = dict(ls="none", marker="x", ms=4.5, mew=1.2, color=MUTED)
 INK = "#0b0b0b"
 # fig_compare: one colour + marker per method (validated categorical palette, fixed order)
 CMP = [("LEAR", "#2a78d6", "o"), ("METRIS", "#eb6834", "s"), ("CLENSHAW", "#1baf7a", "^"),
-       ("PINES", "#eda100", "D"), ("GOTTLIEB", "#e87ba4", "v"), ("LEGENDRE_b", "#008300", "P")]
+       ("PINES", "#eda100", "D"), ("GOTTLIEB", "#e87ba4", "v"), ("LEGENDRE_b", "#008300", "P"),
+       ("HOLMES", "#6250d6", "h")]
 N_TICKS = (10, 100, 1000)
 
 
@@ -250,7 +251,9 @@ def figures(folder):
     Ns = sorted({r["N"] for r in gate})
 
     # ---- accuracy: worst case over all points of the three sets; overflow = Inf/NaN in any output
-    fig, axs = plt.subplots(2, 4, figsize=(7.16, 3.9), sharex=True, sharey=True, layout="constrained")
+    fig = plt.figure(figsize=(7.16, 4.1), layout="constrained")
+    grid = fig.subfigures(1, 1)                       # own subfigure, so its x label does not collide with the legend
+    axs = grid.subplots(2, 4, sharex=True, sharey=True)
     top = GATE_ABS * 4
     for ax, m in zip(axs.flat, METHODS):
         frame(ax, Ns)
@@ -268,23 +271,20 @@ def figures(folder):
         if bad:
             ax.plot(bad, [top] * len(bad), **OVF)
         ax.set_title(tt(m))
-    leg = axs.flat[-1]
-    leg.axis("off")
-    lg = leg.legend(handles=[Line2D([], [], **STYLE[1]),
-                             Line2D([], [], **{**STYLE[2], "label": "Gravity gradient"}),
-                             Line2D([], [], color=MUTED, lw=0.8, ls=":", label=r"Pass threshold $10^{-11}$"),
-                             Line2D([], [], **{**OVF, "label": "Overflow (Inf or NaN)"})],
-                    loc="center", frameon=False, handlelength=2.2, labelspacing=0.9)
-    lg.set_in_layout(False)
-    fig.supxlabel("Maximum degree $N$", fontsize=8)
-    fig.supylabel("Max. relative error", fontsize=8)
+    fig.legend(handles=[Line2D([], [], **STYLE[1]),
+                        Line2D([], [], **{**STYLE[2], "label": "Gravity gradient"}),
+                        Line2D([], [], color=MUTED, lw=0.8, ls=":", label=r"Pass threshold $10^{-11}$"),
+                        Line2D([], [], **{**OVF, "label": "Overflow (Inf or NaN)"})],
+               loc="outside lower center", ncol=4, frameon=False, handlelength=2.2, columnspacing=1.8)
+    grid.supxlabel("Maximum degree $N$", fontsize=8)
+    grid.supylabel("Max. relative error", fontsize=8)
     fig.savefig(folder / "fig_accuracy.pdf")
     plt.close(fig)
 
     # ---- CPU time per point: median over the three point sets, band = their range
     t = pooled(trows)
-    fig = plt.figure(figsize=(7.16, 3.9), layout="constrained")
-    left, right = fig.subfigures(1, 2, width_ratios=(1.15, 3), wspace=0.04)
+    fig = plt.figure(figsize=(7.16, 4.1), layout="constrained")
+    left, right = fig.subfigures(1, 2, width_ratios=(1.15, 3.6), wspace=0.04)
 
     ax = left.subplots()
     frame(ax, Ns)
@@ -298,10 +298,13 @@ def figures(folder):
     log_axis(ax.yaxis, [v for v in (0.1, 1, 10, 100, 1000, 10000) if lo <= v <= hi], lambda v: f"{v:g}")
     ax.set_xlabel("Maximum degree $N$")
     ax.set_ylabel(r"CPU time per point [$\mu$s]")
-    ax.set_title("(a) CPU time of " + tt(REF), loc="left")
+    ax.set_title("(a) " + tt(REF), loc="left")
 
     others = [m for m in METHODS if m != REF]
-    axs = right.subplots(2, 3, sharex=True, sharey=True)
+    axs = right.subplots(2, (len(others) + 1) // 2, sharex=True, sharey=True)
+    for ax in axs.flat[len(others):]:                 # empty cell: show the x tick labels of the panel above
+        ax.axis("off")
+        axs[0, -1].xaxis.set_tick_params(labelbottom=True)
     ylo = min(0.8, min(d["r_lo"] for (m, _, _), d in t.items() if m in others) / 1.06)
     yhi = max(1.25, max(d["r_hi"] for (m, _, _), d in t.items() if m in others) * 1.12)
     for ax, m in zip(axs.flat, others):
